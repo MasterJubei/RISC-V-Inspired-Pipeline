@@ -1,10 +1,12 @@
-/*module tb; 
+module tb; 
     reg [15:0] instruction;
     reg [15:0] instructions [0:256];
+
     initial begin
     $readmemb("instructions2.mem", instructions); 
     end
-    reg reset_n,clock, valid_n;
+    reg reset_n,clock, valid_n, start;
+    wire finished;
 
     initial clock = 0;
     initial reset_n = 1;
@@ -23,17 +25,22 @@
         else begin
             if(valid_n) begin
                 //$display("%b", instruction);
-                if(i<10) begin
+                if(i<7) begin
                     i<=i+1;
                 end else begin
                     valid_n <=0;
+                    @(posedge clock);
+                    start <= 1;
                 end  
+            end
+            if(finished) begin
+                $finish;
             end
             
         end
     end
 
-    router cpu(.clk(clock), .reset_n(reset_n), .instruction(instruction), .valid_n(valid_n));
+    router cpu(.clk(clock), .reset_n(reset_n), .instruction(instruction), .valid_n(valid_n), .start(start), .finished_o2(finished)  );
     initial begin 
         repeat(2) @(posedge clock) ;
         @(posedge clock) ;
@@ -45,7 +52,7 @@
 
     
 endmodule
-*/  
+
 module IF(
     input clk, reset_n, 
     input [7:0] pc,
@@ -58,13 +65,15 @@ module IF(
     output reg is_immed_f_if,
     output reg is_jump_f_if,
     input STALL,
-    output reg finished
+    output reg finished,
+    output reg forward_disable
     );
     
     always @(posedge clk, negedge reset_n) begin
         if(!reset_n) begin
             pc_f_if<=0;
             ALUsrc_f_if<=0;
+            finished <= 0;
         end
         else begin
 
@@ -124,6 +133,7 @@ module IF(
                     mem_write_enable_f_if <= 0;
                     reg_write_enable_f_if <= 0;
                     ALUsrc_f_if <= 0;
+                    forward_disable <= 1;
                     //$finish;
                 end
             end   
@@ -361,7 +371,7 @@ module MEM(
             end else if(start) begin
                 //$display("instruction 0 is: %b", instructions[0]);
                 reg_write_enable_f_mem <= reg_write_enable_f_alu;
-                $display("mem[14] is\n %d", memory[14]);
+                //$display("mem[14] is\n %d", memory[14]);
                 data_out <= memory[addr];
                 pc_f_mem<=pc_f_alu;
                 rd_f_mem <= rd_f_alu;
@@ -458,6 +468,7 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
 
     reg STALL;
     reg STALL_FELL;
+    wire forward_disable;
 
 
     reg [15:0] terminate_in_5;
@@ -486,7 +497,8 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
       .is_jump_f_if         (is_jump_f_if),
       .ALUsrc_f_if          (ALUsrc_f_if),
       .STALL                (STALL),
-      .finished             (finished_internal)
+      .finished             (finished_internal),
+      .forward_disable      (forward_disable)
   );
   RF2 register_file2 (
       .clk                   (clk),
@@ -607,11 +619,13 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                     STALL_FELL <= 1;
                 end
 
-                if(!STALL) 
-                    pc <= pc +1;
+                if(!STALL && !finished_internal) 
+                    pc <= pc + 1;
                 
-                if(STALL_FELL) 
+                if(STALL_FELL) begin
                     STALL_FELL <= 0;
+                    //pc <= pc + 1;
+                end
                 
                 if(forward_enable_rs1_MEM_ID) begin
                     //RS1_MEM_ID_CYCLE_DELAY <= 1;
@@ -674,24 +688,24 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                         $display("\nSTALL ACTIVE\n");
                         STALL<=1;
                     end
-                    
-                    if(rd_f_rf == rs1_f_if)  begin
-                        forward_enable_rs1_EX_ID <= 1;
-                        $display("forward_enable_rs1_EX_ID triggered\n");
-                    end 
-                        else begin
-                            forward_enable_rs1_EX_ID <= 0;
-                        end
+                    if(!forward_disable) begin
+                            if(rd_f_rf == rs1_f_if)  begin
+                            forward_enable_rs1_EX_ID <= 1;
+                            $display("forward_enable_rs1_EX_ID triggered\n");
+                        end 
+                            else begin
+                                forward_enable_rs1_EX_ID <= 0;
+                            end
 
-                    if(rd_f_rf == rs2_f_if) begin
-                        forward_enable_rs2_EX_ID <= 1;
-                        $display("forward_enable_rs2_EX_ID triggered\n");
+                        if(rd_f_rf == rs2_f_if) begin
+                            forward_enable_rs2_EX_ID <= 1;
+                            $display("forward_enable_rs2_EX_ID triggered\n");
 
-                    end 
-                        else begin
-                            forward_enable_rs2_EX_ID <= 0;
-                        end
-
+                        end 
+                            else begin
+                                forward_enable_rs2_EX_ID <= 0;
+                            end   
+                    end
                 end
                 
                 else begin
