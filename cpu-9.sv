@@ -1,6 +1,7 @@
 module tb; 
     reg [15:0] instruction;
     reg [15:0] instructions [0:256];
+    wire [15:0] register_file [15:0];
 
     initial begin
     $readmemb("instructions2.mem", instructions); 
@@ -34,13 +35,16 @@ module tb;
                 end  
             end
             if(finished) begin
+                for(int i = 0; i <16; i++) begin
+                    $display("%d", register_file[i]);
+                end
                 $finish;
             end
             
         end
     end
 
-    router cpu(.clk(clock), .reset_n(reset_n), .instruction(instruction), .valid_n(valid_n), .start(start), .finished_o2(finished)  );
+    router cpu(.clk(clock), .reset_n(reset_n), .instruction(instruction), .valid_n(valid_n), .start(start), .finished_o2(finished), .register_file_out(register_file));
     initial begin 
         repeat(2) @(posedge clock) ;
         @(posedge clock) ;
@@ -206,20 +210,20 @@ module RF2 (
                 is_immed_f_rf <= 0;
             end
 
-            else if(STALL_FELL) begin
-                reg_write_enable_f_rf <= reg_write_enable_f_if_restore;
-                mem_write_enable_f_rf <= mem_write_enable_f_if_restore;
-            end 
+            // else if(STALL_FELL) begin
+            //     reg_write_enable_f_rf <= reg_write_enable_f_if_restore;
+            //     mem_write_enable_f_rf <= mem_write_enable_f_if_restore;
+            // end 
 
             else begin
                 reg_write_enable_f_rf<=reg_write_enable_f_if;
                 mem_write_enable_f_rf<=mem_write_enable_f_if;
                 is_immed_f_rf<=is_immed_f_if;
                 
-                // $display("register 2 contains %d\n", datastorage[2]);
-                // $display("register 3 contains: %d\n", datastorage[3]);
-                // $display("register 4 contains: %d\n", datastorage[4]);
-                // $display("register 6 contains %d\n", datastorage[6]);
+                //  $display("register 2 contains %d\n", datastorage[2]);
+                //  $display("register 3 contains: %d\n", datastorage[3]);
+                //  $display("register 4 contains: %d\n", datastorage[4]);
+                //  $display("register 6 contains %d\n", datastorage[6]);
                 
                 //$display("rs2_f_if is: %d\n", rs2_f_if);
                 
@@ -260,20 +264,20 @@ module ALU(
         end
         else begin
 
-            if(STALL) begin
-                reg_write_enable_f_rf_restore <= reg_write_enable_f_rf;
-                mem_write_enable_f_rf_restore <= mem_write_enable_f_rf;
-            end
+            // if(STALL) begin
+            //     reg_write_enable_f_rf_restore <= reg_write_enable_f_rf;
+            //     mem_write_enable_f_rf_restore <= mem_write_enable_f_rf;
+            // end
 
-            else if(STALL_FELL) begin
-                reg_write_enable_f_alu <= reg_write_enable_f_rf_restore;
-                mem_write_enable_f_alu <= mem_write_enable_f_rf_restore;
-            end
+            // else if(STALL_FELL) begin
+            //     reg_write_enable_f_alu <= reg_write_enable_f_rf_restore;
+            //     mem_write_enable_f_alu <= mem_write_enable_f_rf_restore;
+            // end
 
-            else begin
+            //else begin
                 reg_write_enable_f_alu <= reg_write_enable_f_rf;
                 mem_write_enable_f_alu <= mem_write_enable_f_rf;
-            end
+            //end
 
             opcode_f_alu <= opcode_f_rf;
             rd_f_alu <= rd_f_rf;
@@ -392,7 +396,7 @@ module MEM(
     end
 endmodule
 
-module router(input clk, input reset_n, input [15:0] instruction, input valid_n, input start, output reg [15:0] register_file_out [15:0], output valido_n, output reg finished_o2, output reg start_o);
+module router(input clk, input reset_n, input [15:0] instruction, input valid_n, input start, output [15:0] register_file_out [15:0], output valido_n, output reg finished_o2, output reg start_o);
     //input clk, reset_n; 
     //[15:0] instructions [0:256];
 
