@@ -4,21 +4,20 @@ module tb;
     wire [15:0] register_file [15:0];
 
     initial begin
-    $readmemb("instructions2.mem", instructions); 
+    $readmemb("instructions3.mem", instructions); 
     end
     reg reset_n,clock, valid_n, start;
     wire finished;
 
-    initial clock = 0;
-    initial reset_n = 1;
-    initial valid_n = 1;
+    initial clock = 0;      
+    initial reset_n = 1;    /* Resets the dut */
+    initial valid_n = 1;    /* Used to signal the DUT to read incoming instructions */
     always #5 clock=!clock; 
 
     integer i = 0;
     assign instruction = instructions[i];
     always @(posedge clock, negedge reset_n) begin
         
-
         if(!reset_n) begin
             i <= 0;
         end
@@ -662,12 +661,12 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
 
                 begin   
 
-                    if(rd_f_alu == rs1_f_if && rd_f_rf!=rs1_f_if) begin
+                    if(rd_f_alu == rs1_f_if) begin
                         forward_enable_rs1_MEM_ID <= 1;
                         $display("forward_enable_rs1_MEM_ID triggered\n");
                     end
 
-                    if(rd_f_alu == rs2_f_if && rd_f_rf!=rs2_f_if) begin
+                    if(rd_f_alu == rs2_f_if) begin
                         forward_enable_rs2_MEM_ID <= 1;
                         $display("forward_enable_rs2_MEM_ID triggered\n");
                     end
