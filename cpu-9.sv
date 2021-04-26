@@ -69,7 +69,8 @@ module IF(
     output reg is_jump_f_if,
     input STALL,
     output reg finished,
-    output reg forward_disable
+    output reg forward_disable,
+    input start
     );
     
     always @(posedge clk, negedge reset_n) begin
@@ -77,8 +78,9 @@ module IF(
             pc_f_if<=0;
             ALUsrc_f_if<=0;
             finished <= 0;
+            forward_disable <= 0;
         end
-        else begin
+        else if(start) begin
 
             opcode_f_if<=first_bits;
             rs1_f_if<=second_bits;
@@ -136,7 +138,7 @@ module IF(
                     mem_write_enable_f_if <= 0;
                     reg_write_enable_f_if <= 0;
                     ALUsrc_f_if <= 0;
-                    forward_disable <= 1;
+                    //forward_disable <= 1;
                     //$finish;
                 end
             end   
@@ -161,7 +163,8 @@ module RF2 (
     input[3:0] if_request_out_1, if_request_out_2, waddr, 
     input [15:0] rf_write_input_data, 
     output reg [15:0] rf_data_1, rf_data_2,
-    input STALL, STALL_FELL,
+    input STALL, STALL_FELL, 
+    input start,
     //input [15:0] forward_data_f_alu_rs1, forward_data_f_alu_rs2
     output reg [15:0] datastorage [15:0]
 
@@ -192,7 +195,7 @@ module RF2 (
             //datastorage[15] <= $urandom;
         end 
 
-        else begin
+        else if(start) begin
   
             opcode_f_rf<=opcode_f_if;
             rs1_f_rf<=rs1_f_if;
@@ -249,7 +252,8 @@ module ALU(
     output reg [15:0]alu_out,
     //input [15:0] data_f_alu_rs1,
     output reg [15:0] data_f_alu_rs1,
-    input STALL, STALL_FELL
+    input STALL, STALL_FELL,
+    input start
     //input forward_enable_rs1, forward_enable_rs2,
     //output reg [15:0] forward_data_f_alu_rs1, forward_data_f_alu_rs2
     );
@@ -261,7 +265,7 @@ module ALU(
         if(!reset_n) begin
             pc_f_alu <= 0;
         end
-        else begin
+        else if (start) begin
 
             // if(STALL) begin
             //     reg_write_enable_f_rf_restore <= reg_write_enable_f_rf;
@@ -467,8 +471,6 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
     assign alu_mux_rs2_select = {forward_enable_rs2_EX_ID, forward_enable_rs2_MEM_ID, ALUsrc};
     assign alu_mux_rs2_input = alu_mux_rs2_select[2] ? alu_out : (alu_mux_rs2_select[1] ? alu_out_f_mem : (alu_mux_rs2_select[0] ? rs2_f_rf : data_f_rf_rs2)); 
 
-    wire [1:0]alu_mux_rs2_combined_control; //delete later not used
-
     reg STALL;
     reg STALL_FELL;
     wire forward_disable;
@@ -477,7 +479,8 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
     reg [15:0] terminate_in_5;
     //assign data_f_rf_rs2 = is_immed_f_rf ? third_bits : data_f_rf_rs2;
     //initial $monitor ("First bits are: %b, instruction from memory out is %b, pc is %d, alu out is: %b,  data at reg write port is %d, reg_write_enable is %d, data sitting on mux rs1 is: %d, data sitting on mux rs2 is: %d, data_f_rf_rs1 is %d, data_f_rf_rs2 is %d, opcode_f_rf: %b, opcode_f_alu: %b, rs1_f_rf is: %b, rs2_f_rf is %b, ALUsrc, is: %d, alu_mux_rs2_combined_control is: %b, opcode_f_if: %b, mem_write_enable_f_alu is: %d, alu_mux_rs2_input_1 is: %d, rd_f_rf is %b", first_bits, data_f_mem_pc, pc, alu_out, rf_mux_write_input_data, reg_write_enable_f_mem, alu_mux_rs1_input, alu_mux_rs2_input, data_f_rf_rs1, data_f_rf_rs2, opcode_f_rf, opcode_f_alu, rs1_f_rf, rs2_f_rf, ALUsrc,alu_mux_rs2_combined_control, opcode_f_if, mem_write_enable_f_alu, alu_mux_rs2_input_1, rd_f_rf   );
-    initial $monitor ("PC: %d, Instruction from memory: %b, alu out is: %d, data at reg_write port: %d, instruction in is %b, valid_n is %d, start is %d", pc, data_f_mem_pc, alu_out, rf_mux_write_input_data, instruction, valid_n, start);
+    //initial $monitor ("PC: %d, Instruction from memory: %b, alu out is: %d, data at reg_write port: %d, instruction in is %b, valid_n is %d, start is %d", pc, data_f_mem_pc, alu_out, rf_mux_write_input_data, instruction, valid_n, start);
+    initial $monitor ("PC: %d, rs1_f_if %d, rs2_f_if %d, rd_f_if %d, rs1_f_rf %d, rs2_f_rf %d, rd_f_rf %d, rd_f_alu %d, alu_out %d, rs1_on_alu %d, rs2_on_alu %d" , pc, rs1_f_if, rs2_f_if, rd_f_if, rs1_f_rf,rs2_f_rf, rd_f_rf, rd_f_alu, alu_out, alu_mux_rs1_input, alu_mux_rs2_input  );
     //initial $monitor("Data in target register: Binary: %b Decimal: %d Hex:%h  Program Counter:%d", data_f_rf_rs1, data_f_rf_rs2, data_to_rf, pc);
     //initial $monitor ("First bits are: %b", first_bits);
     
@@ -501,7 +504,8 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
       .ALUsrc_f_if          (ALUsrc_f_if),
       .STALL                (STALL),
       .finished             (finished_internal),
-      .forward_disable      (forward_disable)
+      .forward_disable      (forward_disable),
+      .start                (start)
   );
   RF2 register_file2 (
       .clk                   (clk),
@@ -535,7 +539,8 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
       .reg_write_enable_f_mem(reg_write_enable_f_mem),
       .STALL                 (STALL),
       .STALL_FELL            (STALL_FELL),
-      .datastorage          (register_file_out)
+      .datastorage          (register_file_out),
+      .start                (start)
     //   .forward_data_f_alu_rs1 (forward_data_f_alu_rs1),
     //   .forward_data_f_alu_rs2 (forward_data_f_alu_rs2)
       
@@ -560,7 +565,8 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
       .is_jump_f_rf           (is_jump_f_rf),
       .data_f_alu_rs1         (data_f_alu_rs1),
       .STALL                  (STALL),
-      .STALL_FELL             (STALL_FELL)
+      .STALL_FELL             (STALL_FELL),
+      .start                  (start)
     //   .forward_data_f_alu_rs1 (forward_data_f_alu_rs1),
     //   .forward_data_f_alu_rs2 (forward_data_f_alu_rs2),
     //   .forward_enable_rs1     (forward_enable_rs1),
@@ -661,15 +667,25 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
 
                 begin   
 
-                    if(rd_f_alu == rs1_f_if) begin
+
+                    if(rd_f_alu == rs1_f_if && (rd_f_alu != rd_f_rf)) begin
                         forward_enable_rs1_MEM_ID <= 1;
                         $display("forward_enable_rs1_MEM_ID triggered\n");
                     end
 
-                    if(rd_f_alu == rs2_f_if) begin
+                    if(rd_f_alu == rs2_f_if && (rd_f_alu != rd_f_rf)) begin
                         forward_enable_rs2_MEM_ID <= 1;
                         $display("forward_enable_rs2_MEM_ID triggered\n");
                     end
+                    // if(rd_f_alu == rs1_f_if && (rd_f_alu != rd_f_rf)) begin
+                    //     forward_enable_rs1_MEM_ID <= 1;
+                    //     $display("forward_enable_rs1_MEM_ID triggered\n");
+                    // end
+
+                    // if(rd_f_alu == rs2_f_if && (rd_f_alu != rd_f_rf)) begin
+                    //     forward_enable_rs2_MEM_ID <= 1;
+                    //     $display("forward_enable_rs2_MEM_ID triggered\n");
+                    // end
                 end
                 
                 if((opcode_f_rf == 4'b0100 || 
@@ -692,22 +708,22 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                         STALL<=1;
                     end
                     if(!forward_disable) begin
-                            if(rd_f_rf == rs1_f_if)  begin
+
+                        if(rd_f_rf == rs1_f_if)  begin
                             forward_enable_rs1_EX_ID <= 1;
                             $display("forward_enable_rs1_EX_ID triggered\n");
                         end 
-                            else begin
-                                forward_enable_rs1_EX_ID <= 0;
-                            end
+                        else begin
+                            forward_enable_rs1_EX_ID <= 0;
+                        end
 
                         if(rd_f_rf == rs2_f_if) begin
                             forward_enable_rs2_EX_ID <= 1;
                             $display("forward_enable_rs2_EX_ID triggered\n");
-
                         end 
-                            else begin
-                                forward_enable_rs2_EX_ID <= 0;
-                            end   
+                        else begin
+                            forward_enable_rs2_EX_ID <= 0;
+                        end   
                     end
                 end
                 
