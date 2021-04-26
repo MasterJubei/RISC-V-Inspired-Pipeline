@@ -25,7 +25,7 @@ module tb;
         else begin
             if(valid_n) begin
                 //$display("%b", instruction);
-                if(i<7) begin
+                if(i<8) begin
                     i<=i+1;
                 end else begin
                     valid_n <=0;
