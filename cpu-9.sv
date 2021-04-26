@@ -666,7 +666,16 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                 opcode_f_if==4'b0000)) 
 
                 begin   
-
+                /*Forwarding support, distance of 2. We are looking from IF to ALU_OUT
+                This data then will take priority over the stale copy 
+                Example:
+                1.  x2 = x3 = x4  ,
+                2.  x3 = x2 + x3
+                3.  x2 = x2 + x2  ,need x2 from line 1 
+                
+                x2 is consumed line 2, EX_ID handles that instead. We are handling consumption of x2 on line 3. 
+                We also should make sure RD from line 1 and line 2 do not match. Otherwise EX_ID would handle this.
+                */
 
                     if(rd_f_alu == rs1_f_if && (rd_f_alu != rd_f_rf)) begin
                         forward_enable_rs1_MEM_ID <= 1;
@@ -677,15 +686,7 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                         forward_enable_rs2_MEM_ID <= 1;
                         $display("forward_enable_rs2_MEM_ID triggered\n");
                     end
-                    // if(rd_f_alu == rs1_f_if && (rd_f_alu != rd_f_rf)) begin
-                    //     forward_enable_rs1_MEM_ID <= 1;
-                    //     $display("forward_enable_rs1_MEM_ID triggered\n");
-                    // end
 
-                    // if(rd_f_alu == rs2_f_if && (rd_f_alu != rd_f_rf)) begin
-                    //     forward_enable_rs2_MEM_ID <= 1;
-                    //     $display("forward_enable_rs2_MEM_ID triggered\n");
-                    // end
                 end
                 
                 if((opcode_f_rf == 4'b0100 || 
@@ -708,7 +709,15 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                         STALL<=1;
                     end
                     if(!forward_disable) begin
-
+                        /*Forwarding support, distance of 1. We are looking from IF output to RF output
+                        This data then will take priority over the stale copy 
+                        Example:
+                        1.  x2 = x3 = x4  
+                        2.  x3 = x2 + x3
+                        3.  x2 = x2 + x2  
+                        
+                        x2 consumed line 2, We are handling that case here.
+                        We are not handling x2 being consumed on line 3, that is handled by MEM_ID.*/
                         if(rd_f_rf == rs1_f_if)  begin
                             forward_enable_rs1_EX_ID <= 1;
                             $display("forward_enable_rs1_EX_ID triggered\n");
