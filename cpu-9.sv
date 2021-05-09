@@ -4,7 +4,7 @@ module tb;
     wire [15:0] register_file [15:0];
 
     initial begin
-    $readmemb("instructions3.mem", instructions); 
+    $readmemb("instructions2.mem", instructions); 
     end
     reg reset_n,clock, valid_n, start;
     wire finished;
@@ -347,6 +347,7 @@ module MEM(
     );
     reg [15:0] instructions [0:256];
     reg [15:0] memory [0:256];
+    reg [7:0] memory2 [0:1024];
     reg [7:0] instruction_counter;
     /*
     8 bit input address limits memory space to 256 addresses as opposed to 65,536
@@ -379,13 +380,16 @@ module MEM(
                 //$display("instruction 0 is: %b", instructions[0]);
                 reg_write_enable_f_mem <= reg_write_enable_f_alu;
                 //$display("mem[14] is\n %d", memory[14]);
-                data_out <= memory[addr];
+                //data_out <= memory[addr];
+                data_out <= { memory2[addr+1], memory2[addr] };
                 pc_f_mem<=pc_f_alu;
                 rd_f_mem <= rd_f_alu;
                 alu_out_f_mem <= alu_out;
         
                 if(write_enable) begin
                     memory[addr]<=data_in;
+                    memory2[addr] <= data_in[7:0];
+                    memory2[addr+1] <= data_in[15:8];
                 end
 
                 if(opcode_f_alu==4'b0000) begin
