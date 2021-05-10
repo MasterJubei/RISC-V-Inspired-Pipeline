@@ -64,7 +64,10 @@ module tb();
     initial begin
         #5;
         activate = 1;
-        #100;
+        #100
+        address = 16'h0008;
+        data = 16'hDEAD;
+        #200;
         $finish;
     end
     
@@ -88,10 +91,10 @@ module cache #(parameter CACHE_NUM_COL = 8
     input activate,
     input INSTR_TYPE instr_type,   // 0 = read, 1 = write
 
-    output reg [31:0] data_to_mem,  /*The data that should be saved from the cache to memory */
+    output reg [31:0] data_to_mem,  /*The data(cache block) that should be saved from the cache to memory */
     output reg mem_load_req,        /*If high, need to load data from memory into cache*/
     output reg mem_store_req,       /*If high, need to save cache block to memory */
-    output reg mem_store_ack,        /*If high, then the memory has succesfully stored */
+    output reg mem_store_ack,       /*If high, then the memory has succesfully stored */
     input mem_store_processed,      /*If high, memory has stored 4 bytse from the cache block.*/
     input mem_load_req_rdy,         /*If high, the data loaded from memory is ready */
 
@@ -101,7 +104,7 @@ module cache #(parameter CACHE_NUM_COL = 8
     reg [31:0] cache_data [0:7];    /* If you load address 0x02, get the data for 0x00 as well in the cache. If you grab 0x00, also get 0x02 */
     reg [10:0] tag_number [0:7]; 
     reg [15:0] block_address;       /* We will divide address by cache size to get block address */ 
-    reg [15:0] block_number;        /* We will modulo the block addres by cache size to get the column */
+    reg [15:0] block_num;        /* We will modulo the block addres by cache size to get the column */
     reg [7:0] to_evict;             /* If any of the bits are set, the cache block should be written to memory and freed from the cache */
 
 
@@ -112,15 +115,20 @@ module cache #(parameter CACHE_NUM_COL = 8
     task send_to_mem (input int i);
         begin
            data_to_mem = cache_data[i];
-           $display("Cache data[%d] is %b", i, cache_data[i]);
+           $display("Cache data[%d] is %h", i, cache_data[i]);
            mem_store_req = 1;
            address_to_mem = address_in;
            $display("%0t", $time);
-           wait(mem_store_processed == 1) begin
+           wait(mem_store_processed == 1) begin /* We will wait until memory has completed the store */
                $display("Memory store has been processed - from cache");
                $display("%0t", $time);
-               mem_store_ack = 1;
-               mem_store_req = 0;
+               mem_store_ack = 1;   /* We tell the memory that we ack the store, so now it can turn off its write enable*/ 
+               mem_store_req = 0;   /* We do not have a request anymore */
+               wait(mem_store_processed == 0) begin /* We will wait until the memory is able to store new data*/
+                   mem_store_ack = 0;   /* We are done acknowledging that the memory has stored the cache block */
+                   $display("Memory store has fully completed - from cache");
+                   $display("%0t", $time);
+               end
            end
         //    wait (mem_store_processed == 1) begin
               
@@ -139,18 +147,20 @@ module cache #(parameter CACHE_NUM_COL = 8
             end
 
             block_address = address_in / BL_NUM_BYTES;
-            block_number = block_address % CACHE_NUM_COL;
+            block_num = block_address % CACHE_NUM_COL;
+            $display("block_address is %d", block_address );
+            $display("block_num is %d", block_num);
 
             /* Let's assume a load */
             if(instr_type == READ) begin
-                if(vld[block_number] == 1) begin
-                    if(tag_number[block_number] == address_in[15:5]) begin
+                if(vld[block_num] == 1) begin
+                    if(tag_number[block_num] == address_in[15:5]) begin
                         read_success = 1;
                         if(address_in % 4 == 0) begin
-                            data_out = cache_data[block_number][15:0];
+                            data_out = cache_data[block_num][15:0];
                         end 
                         else if(address_in % 2 == 2) begin
-                            data_out = cache_data[block_number][31:16];
+                            data_out = cache_data[block_num][31:16];
                         end
                     end
                 end
@@ -167,23 +177,23 @@ module cache #(parameter CACHE_NUM_COL = 8
             /* Let's assume a store */
             else if(instr_type == WRITE) begin
                 $display("Got a write instruction");
-                if(vld[block_number] == 0) begin
-                    vld[block_number] = 1;
-                    cache_data[block_number] = '0;
-                    tag_number[block_number] = address_in[15:6];
+                if(vld[block_num] == 0) begin
+                    vld[block_num] = 1;
+                    cache_data[block_num] = '0;
+                    tag_number[block_num] = address_in[15:6];
                 end
 
                 if(address_in % 4 == 0) begin
-                    cache_data[block_number][15:0] = data_in;
+                    cache_data[block_num][15:0] = data_in;
                 end
 
                 else if(address_in % 2 == 0) begin
-                    cache_data[block_number][31:16] = data_in;
+                    cache_data[block_num][31:16] = data_in;
                 end
             end
 
             /* Let's write a cache block to memory */
-            to_evict[1] = 1;
+            to_evict[block_num] = 1;
             
             for(int i = 0; i < CACHE_NUM_COL; i++ ) begin
                 if(to_evict[i] == 1) begin
@@ -191,11 +201,13 @@ module cache #(parameter CACHE_NUM_COL = 8
                 end
             end
 
+            to_evict[block_num] = 0;    
+
 
 
             read_success = 0;
-            $display("Block number is %d", block_number);
-            $display("Data at cache_data[block_number] is %h", cache_data[block_number]);
+            $display("Block number is %d", block_num);
+            $display("Data at cache_data[block_num] is %h", cache_data[block_num]);
 
         end
 end
@@ -219,7 +231,11 @@ module RAM
 reg [D_WIDTH-1:0] mem [0:(2**WIDTH_AD)-1];
 
 always @(posedge clk) begin
-    if(wren) begin 
+    if(store_ack) begin
+        mem[address_in] <= data_in;
+        store_completed <= 0;   /*We need to tell the cache to continue */
+    end
+    else if(wren) begin 
         mem[address_in] <= data_in;
         store_completed <= 1;
     end
