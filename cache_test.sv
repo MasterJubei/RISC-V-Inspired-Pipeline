@@ -1,3 +1,4 @@
+`default_nettype none
 typedef enum {READ, WRITE} INSTR_TYPE;
 
 module tb();
@@ -22,6 +23,7 @@ module tb();
     wire mem_load_req_rdy;
     wire mem_store_completed;   /*Memory confirming it has stored cache block */
     wire mem_store_ack;         /*Cache confirming it has ack the cache block write */
+    wire [31:0] mem_data;       /*Cache block from memory*/
 
     wire [15:0] address_f_cache;
 
@@ -54,6 +56,7 @@ module tb();
         .clk(clk),
         .address_in(address_f_cache),
         .data_in(block_f_cache),
+        .data_out(mem_data),
         .wren(mem_store_req_f_cache),
         .load_completed(mem_load_req_rdy),
         .store_completed(mem_store_completed),
@@ -80,7 +83,7 @@ module cache_controller(
 
 endmodule
 
-module cache #(parameter CACHE_NUM_COL = 8
+module cache #(parameter CACHE_NUM_COL = 8 /*Number of rows in the cache */
     //parameter WIDTH_AD   = 8
     )
     (
@@ -104,13 +107,12 @@ module cache #(parameter CACHE_NUM_COL = 8
     reg [31:0] cache_data [0:7];    /* If you load address 0x02, get the data for 0x00 as well in the cache. If you grab 0x00, also get 0x02 */
     reg [10:0] tag_number [0:7]; 
     reg [15:0] block_address;       /* We will divide address by cache size to get block address */ 
-    reg [15:0] block_num;        /* We will modulo the block addres by cache size to get the column */
+    reg [15:0] block_num;           /* We will modulo the block addres by cache size to get the column */
     reg [7:0] to_evict;             /* If any of the bits are set, the cache block should be written to memory and freed from the cache */
 
 
     parameter BL_NUM_BYTES = 4; /*Number of bytes in a block, aka number of columns */
-    //parameter CACHE_NUM_COL = 8; /*Number of rows in the cache */
-    reg read_success = 0;
+    reg read_success = 0;   
 
     task send_to_mem (input int i);
         begin
@@ -130,10 +132,6 @@ module cache #(parameter CACHE_NUM_COL = 8
                    $display("%0t", $time);
                end
            end
-        //    wait (mem_store_processed == 1) begin
-              
-        //    end
-
         end
     endtask
 

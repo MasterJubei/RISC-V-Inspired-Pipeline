@@ -1,3 +1,4 @@
+`default_nettype none
 module tb; 
     reg [15:0] instruction;
     reg [15:0] instructions [0:256];
@@ -212,22 +213,10 @@ module RF2 (
                 is_immed_f_rf <= 0;
             end
 
-            // else if(STALL_FELL) begin
-            //     reg_write_enable_f_rf <= reg_write_enable_f_if_restore;
-            //     mem_write_enable_f_rf <= mem_write_enable_f_if_restore;
-            // end 
-
             else begin
                 reg_write_enable_f_rf<=reg_write_enable_f_if;
                 mem_write_enable_f_rf<=mem_write_enable_f_if;
                 is_immed_f_rf<=is_immed_f_if;
-                
-                //  $display("register 2 contains %d\n", datastorage[2]);
-                //  $display("register 3 contains: %d\n", datastorage[3]);
-                //  $display("register 4 contains: %d\n", datastorage[4]);
-                //  $display("register 6 contains %d\n", datastorage[6]);
-                
-                //$display("rs2_f_if is: %d\n", rs2_f_if);
                 
                 if(reg_write_enable_f_mem) begin
                     datastorage[waddr]<=rf_write_input_data;
@@ -236,8 +225,6 @@ module RF2 (
         end
     end
     
-    // assign rf_data_1 = datastorage[if_request_out_1];
-    // assign rf_data_2 = datastorage[if_request_out_2];
     
 endmodule
 
@@ -250,16 +237,10 @@ module ALU(
     output reg reg_write_enable_f_alu, mem_write_enable_f_alu,  
     input [15:0] alu_input_rs1, alu_input_rs2, 
     output reg [15:0]alu_out,
-    //input [15:0] data_f_alu_rs1,
     output reg [15:0] data_f_alu_rs1,
     input STALL, STALL_FELL,
     input start
-    //input forward_enable_rs1, forward_enable_rs2,
-    //output reg [15:0] forward_data_f_alu_rs1, forward_data_f_alu_rs2
     );
-
-    reg reg_write_enable_f_rf_restore;
-    reg mem_write_enable_f_rf_restore;
 
     always @(posedge clk, negedge reset_n) begin
         if(!reset_n) begin
@@ -267,26 +248,14 @@ module ALU(
         end
         else if (start) begin
 
-            // if(STALL) begin
-            //     reg_write_enable_f_rf_restore <= reg_write_enable_f_rf;
-            //     mem_write_enable_f_rf_restore <= mem_write_enable_f_rf;
-            // end
-
-            // else if(STALL_FELL) begin
-            //     reg_write_enable_f_alu <= reg_write_enable_f_rf_restore;
-            //     mem_write_enable_f_alu <= mem_write_enable_f_rf_restore;
-            // end
-
-            //else begin
-                reg_write_enable_f_alu <= reg_write_enable_f_rf;
-                mem_write_enable_f_alu <= mem_write_enable_f_rf;
-            //end
+            
+            reg_write_enable_f_alu <= reg_write_enable_f_rf;
+            mem_write_enable_f_alu <= mem_write_enable_f_rf;
 
             opcode_f_alu <= opcode_f_rf;
             rd_f_alu <= rd_f_rf;
             data_f_alu_rs1 <= alu_input_rs1;
             
-
             if(opcode_f_rf==4'b0100) begin    // add, add x1, x2, x3     rs1 = x2, rs2 = x3, rd=x1
                 alu_out<=alu_input_rs1+alu_input_rs2;
                 pc_f_alu<=pc_f_rf;
@@ -358,29 +327,19 @@ module MEM(
     // int i;
     // int j;
 
-    
-
     assign data_out_pc = instructions[pc];
     
     always@(posedge clk, negedge reset_n)
     begin
         if(!reset_n) begin
             instruction_counter <= 0;
-        //     for (i = 0; i<256; i=i+1) begin
-        //         for (j=0; j<16; j=j+1) begin
-        //            instructions[i][j] = instructions_[i][j];
-        //        end
-        //    end
         end 
         else begin
             if(valid_n) begin
                 instructions[instruction_counter] <= instruction;
                 instruction_counter++;
             end else if(start) begin
-                //$display("instruction 0 is: %b", instructions[0]);
                 reg_write_enable_f_mem <= reg_write_enable_f_alu;
-                //$display("mem[14] is\n %d", memory[14]);
-                //data_out <= memory[addr];
                 data_out <= { memory2[addr+1], memory2[addr] };
                 pc_f_mem<=pc_f_alu;
                 rd_f_mem <= rd_f_alu;
@@ -478,15 +437,10 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
     reg STALL;
     reg STALL_FELL;
     wire forward_disable;
-
-
     reg [15:0] terminate_in_5;
-    //assign data_f_rf_rs2 = is_immed_f_rf ? third_bits : data_f_rf_rs2;
-    //initial $monitor ("First bits are: %b, instruction from memory out is %b, pc is %d, alu out is: %b,  data at reg write port is %d, reg_write_enable is %d, data sitting on mux rs1 is: %d, data sitting on mux rs2 is: %d, data_f_rf_rs1 is %d, data_f_rf_rs2 is %d, opcode_f_rf: %b, opcode_f_alu: %b, rs1_f_rf is: %b, rs2_f_rf is %b, ALUsrc, is: %d, alu_mux_rs2_combined_control is: %b, opcode_f_if: %b, mem_write_enable_f_alu is: %d, alu_mux_rs2_input_1 is: %d, rd_f_rf is %b", first_bits, data_f_mem_pc, pc, alu_out, rf_mux_write_input_data, reg_write_enable_f_mem, alu_mux_rs1_input, alu_mux_rs2_input, data_f_rf_rs1, data_f_rf_rs2, opcode_f_rf, opcode_f_alu, rs1_f_rf, rs2_f_rf, ALUsrc,alu_mux_rs2_combined_control, opcode_f_if, mem_write_enable_f_alu, alu_mux_rs2_input_1, rd_f_rf   );
-    //initial $monitor ("PC: %d, Instruction from memory: %b, alu out is: %d, data at reg_write port: %d, instruction in is %b, valid_n is %d, start is %d", pc, data_f_mem_pc, alu_out, rf_mux_write_input_data, instruction, valid_n, start);
+
     initial $monitor ("PC: %d, rs1_f_if %d, rs2_f_if %d, rd_f_if %d, rs1_f_rf %d, rs2_f_rf %d, rd_f_rf %d, rd_f_alu %d, alu_out %d, rs1_on_alu %d, rs2_on_alu %d" , pc, rs1_f_if, rs2_f_if, rd_f_if, rs1_f_rf,rs2_f_rf, rd_f_rf, rd_f_alu, alu_out, alu_mux_rs1_input, alu_mux_rs2_input  );
-    //initial $monitor("Data in target register: Binary: %b Decimal: %d Hex:%h  Program Counter:%d", data_f_rf_rs1, data_f_rf_rs2, data_to_rf, pc);
-    //initial $monitor ("First bits are: %b", first_bits);
+
     
   IF instr_fetch (
       .clk                  (clk),
@@ -650,13 +604,6 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                     forward_enable_rs2_MEM_ID <=0;
                 end
                 
-                // if(RS1_MEM_ID_CYCLE_DELAY) 
-                //     RS2_MEM_ID_CYCLE_DELAY <= 0;
-                
-                // if(RS2_MEM_ID_CYCLE_DELAY)
-                //     RS2_MEM_ID_CYCLE_DELAY <= 0;
-
-
                 if((opcode_f_alu == 4'b0100 || 
                 opcode_f_alu == 4'b0101 || 
                 opcode_f_alu == 4'b1000 ||
@@ -772,18 +719,6 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                 if(terminate_in_5 == 1) begin
                     finished_o2 <= 1;
                 end
-
-                // if(pc == 7 ) begin
-                //     finished_o2 <= 1;
-                // end
-                // if(pc == 8) begin
-                //     //finished_o2 <= 0;
-                    
-                // end
-
-                // if(pc == 9) begin
-                //     //finished_o2 <= 1;
-                // end
 
                 if(pc==10) begin
                     
