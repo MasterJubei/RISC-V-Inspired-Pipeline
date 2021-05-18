@@ -2,6 +2,7 @@
 ##### This is primarily for learning
 
 ------------
+- 5 Stages (IF, ID, EX, MEM, WB)
 
 - Forwarding is supported
 
@@ -13,6 +14,7 @@
 
 - This is heavily based on The Morgan Kaufmann Series in Computer Architecture and design, RISC V Edition 2017
 
+- cpu-9.sv contains the entire CPU, cache.sv is not connected 
 
 | Instruction  |OP  |RS1   |RS2/IMM   |RD   |Example   |
 | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ |
