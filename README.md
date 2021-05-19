@@ -1,6 +1,10 @@
 ### RISC-V Based Pipelined CPU
 ##### This is primarily for learning
 
+- This code should hopefully be straight forward for someone to understand how a simple pipelined CPU can function
+
+- This code was made primarily in two quarters for two classes taught by Professor Jim Lewis at Santa Clara University
+
 ------------
 - 5 Stages (IF, ID, EX, MEM, WB)
 
