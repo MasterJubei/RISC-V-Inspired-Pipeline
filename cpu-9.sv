@@ -1,11 +1,15 @@
 `default_nettype none
+/* The TB reads the instructions file 
+   While sending the instructions to the DUT's memory, valid_n = 1
+   When we start, set start = 1, valid_n = 0
+*/
 module tb; 
     reg [15:0] instruction;
     reg [15:0] instructions [0:256];
     wire [15:0] register_file [15:0];
 
     initial begin
-    $readmemb("instructions2.mem", instructions); 
+    $readmemb("instructions3.mem", instructions); 
     end
     reg reset_n,clock, valid_n, start;
     wire finished;
@@ -57,6 +61,9 @@ module tb;
     
 endmodule
 
+/*  Instruction Fetch 
+    Most outputs are from forwarding data to the next stage (Instruction Decode(Register File))
+*/
 module IF(
     input clk, reset_n, 
     input [7:0] pc,
@@ -105,7 +112,6 @@ module IF(
                 end
                 
                 if(first_bits==4'b1000) begin   //addi
-                    //$display("hello");
                     is_immed_f_if<=1;
                     ALUsrc_f_if<=1;
                     mem_write_enable_f_if <= 0;
@@ -134,13 +140,11 @@ module IF(
                     ALUsrc_f_if <= 1;
                 end
     
-                if(first_bits==4'b1111) begin
+                if(first_bits==4'b1111) begin   //halt
                     finished <= 1;
                     mem_write_enable_f_if <= 0;
                     reg_write_enable_f_if <= 0;
                     ALUsrc_f_if <= 0;
-                    //forward_disable <= 1;
-                    //$finish;
                 end
             end   
         end
@@ -148,17 +152,27 @@ module IF(
     
 endmodule
 
+/*  Register File
+    16 registers, 16 bits each
+*/
 
 module RF2 (
     input clk, reset_n, 
     input [7:0] pc_f_if,
     output reg [7:0] pc_f_rf,
     input reg_write_enable_f_if, 
-    mem_write_enable_f_if, is_immed_f_if, 
+    mem_write_enable_f_if, 
+    is_immed_f_if, 
     ALUsrc_f_if, 
     is_jump_f_if, 
     reg_write_enable_f_mem,
-    output reg reg_write_enable_f_rf, mem_write_enable_f_rf, is_immed_f_rf, ALUsrc_f_rf, is_jump_f_rf,
+
+    output reg reg_write_enable_f_rf, 
+    mem_write_enable_f_rf, 
+    is_immed_f_rf, 
+    ALUsrc_f_rf, 
+    is_jump_f_rf,
+
     input [3:0] opcode_f_if, rs1_f_if, rs2_f_if, rd_f_if, 
     output reg[3:0] opcode_f_rf, rs1_f_rf, rs2_f_rf, rd_f_rf, 
     input[3:0] if_request_out_1, if_request_out_2, waddr, 
@@ -166,14 +180,11 @@ module RF2 (
     output reg [15:0] rf_data_1, rf_data_2,
     input STALL, STALL_FELL, 
     input start,
-    //input [15:0] forward_data_f_alu_rs1, forward_data_f_alu_rs2
     output reg [15:0] datastorage [15:0]
 
     ); 
     
     reg reg_write_enable_f_if_restore, mem_write_enable_f_if_restore;
-
-    //reg [15:0] datastorage [15:0];
     
     always@(posedge clk, negedge reset_n) begin
         if(!reset_n) begin
@@ -204,9 +215,12 @@ module RF2 (
             rd_f_rf<=rd_f_if;
             ALUsrc_f_rf <= ALUsrc_f_if;
             pc_f_rf <=pc_f_if;
+
+            /* Get the data of pointed by RS1 and RS2 from the RF */
             rf_data_1 <= datastorage[if_request_out_1];
             rf_data_2 <= datastorage[if_request_out_2];
 
+            /* Due to timing, we can't just forward the data from the IF stage when stalled (that would be a cycle late) */
             if(STALL) begin
                 reg_write_enable_f_rf <= 0;
                 mem_write_enable_f_rf <= 0;
@@ -214,12 +228,14 @@ module RF2 (
             end
 
             else begin
+            /* Under normal conditions we can forward data from the IF stage */
                 reg_write_enable_f_rf<=reg_write_enable_f_if;
                 mem_write_enable_f_rf<=mem_write_enable_f_if;
                 is_immed_f_rf<=is_immed_f_if;
-                
+            
+            /* If the write signal is enabled, write to the register file */
                 if(reg_write_enable_f_mem) begin
-                    datastorage[waddr]<=rf_write_input_data;
+                    datastorage[waddr] <= rf_write_input_data;
                 end
             end
         end
@@ -227,6 +243,10 @@ module RF2 (
     
     
 endmodule
+
+/* ALU module
+   Even though we decoded the opcode in the IF stage, it is not a big deal to check the arithmatic instruction by checking the opcode here
+   We would only be saving a bit of area if we encoded the ALU operation  */
 
 module ALU(
     input clk, reset_n, reg_write_enable_f_rf, mem_write_enable_f_rf, is_jump_f_rf, 
@@ -248,48 +268,51 @@ module ALU(
         end
         else if (start) begin
 
-            
+            /* Forwarding data from previous stages */
             reg_write_enable_f_alu <= reg_write_enable_f_rf;
             mem_write_enable_f_alu <= mem_write_enable_f_rf;
 
             opcode_f_alu <= opcode_f_rf;
             rd_f_alu <= rd_f_rf;
             data_f_alu_rs1 <= alu_input_rs1;
+
+            /* Checking the opcode again for the operation */
             
             if(opcode_f_rf==4'b0100) begin    // add, add x1, x2, x3     rs1 = x2, rs2 = x3, rd=x1
-                alu_out<=alu_input_rs1+alu_input_rs2;
-                pc_f_alu<=pc_f_rf;
+                alu_out <= alu_input_rs1+alu_input_rs2;
+                pc_f_alu <= pc_f_rf;
             end
             
             if(opcode_f_rf==4'b0000) begin   //load word
-                alu_out<= alu_input_rs1 + alu_input_rs2;
-                pc_f_alu<=pc_f_rf;
+                alu_out <= alu_input_rs1 + alu_input_rs2;
+                pc_f_alu <= pc_f_rf;
             end
             
-            if(opcode_f_rf==4'b0001) begin   //store word
-                alu_out<=alu_input_rs1 + alu_input_rs2;
-                pc_f_alu<=pc_f_rf;
+            if(opcode_f_rf == 4'b0001) begin   //store word
+                alu_out <= alu_input_rs1 + alu_input_rs2;
+                pc_f_alu <= pc_f_rf;
             end
             
             if(opcode_f_rf == 4'b0100) begin  //add
-                alu_out<=alu_input_rs1 + alu_input_rs2;
-                pc_f_alu<=pc_f_rf;
+                alu_out <= alu_input_rs1 + alu_input_rs2;
+                pc_f_alu <= pc_f_rf;
             end
             
             if(opcode_f_rf == 4'b0101) begin    //sub
-               // $display("hello");
-                alu_out<=alu_input_rs1 - alu_input_rs2;
-                pc_f_alu<=pc_f_rf;
-                //$display("testeststest");
+                alu_out <= alu_input_rs1 - alu_input_rs2;
+                pc_f_alu <= pc_f_rf;
             end
             
             if(opcode_f_rf == 4'b1000) begin    //addi
                 alu_out <= alu_input_rs1 + alu_input_rs2;
-                pc_f_alu<=pc_f_rf;
+                pc_f_alu <= pc_f_rf;
             end 
         end
     end
 endmodule
+
+/* Memory stage, a cache is to be added here
+   This is essentially an SRAM as it is now */
 
 module MEM(
     input clk, reset_n,
@@ -314,19 +337,13 @@ module MEM(
     input valid_n,
     input start
     );
-    reg [15:0] instructions [0:256];
-    reg [15:0] memory [0:256];
-    reg [7:0] memory2 [0:1024];
-    reg [7:0] instruction_counter;
-    /*
-    8 bit input address limits memory space to 256 addresses as opposed to 65,536
-    This will help will simluation.synthesis speed
-    
-    */
-    //initial $monitor("Instruction in mem is %b", instructions[0] );
-    // int i;
-    // int j;
 
+    reg [15:0] instructions [0:256];    /* Instruction Memory */
+    //reg [15:0] memory [0:256];
+    reg [7:0] memory2 [0:1024];         /* We will make the memory 8 bits long instead */
+    reg [7:0] instruction_counter;      /* We have a seperate counter for loading instructions
+                                           We use the pc in normal operation */
+    
     assign data_out_pc = instructions[pc];
     
     always@(posedge clk, negedge reset_n)
@@ -336,22 +353,25 @@ module MEM(
         end 
         else begin
             if(valid_n) begin
+                /* If valid_n is high, load instructions from the TB */
                 instructions[instruction_counter] <= instruction;
                 instruction_counter++;
             end else if(start) begin
+                /*Forward data from previous stages */
                 reg_write_enable_f_mem <= reg_write_enable_f_alu;
                 data_out <= { memory2[addr+1], memory2[addr] };
-                pc_f_mem<=pc_f_alu;
+                pc_f_mem <= pc_f_alu;
                 rd_f_mem <= rd_f_alu;
                 alu_out_f_mem <= alu_out;
         
                 if(write_enable) begin
-                    memory[addr]<=data_in;
+                    //memory[addr] <= data_in;
                     memory2[addr] <= data_in[7:0];
                     memory2[addr+1] <= data_in[15:8];
                 end
 
                 if(opcode_f_alu==4'b0000) begin
+                    /* If we have a load word instruction, we will be writing to the RF */
                     MemtoReg <= 1;
                 end 
                 else begin
@@ -363,19 +383,15 @@ module MEM(
 endmodule
 
 module router(input clk, input reset_n, input [15:0] instruction, input valid_n, input start, output [15:0] register_file_out [15:0], output valido_n, output reg finished_o2, output reg start_o);
-    //input clk, reset_n; 
-    //[15:0] instructions [0:256];
 
-    //output reg finished_o2;
     wire finished_internal;
     assign valido_n = valid_n;
     assign start_o = start;
-    //wire [15:0] register_file_out2 [15:0];
     
-    wire signed [15:0] data_f_mem;    //Data from the memory, used by lw/sw         
-    wire signed [0:15] data_f_mem_pc; //Data at pc, flip bits, big endian easier for this 
+    wire signed [15:0] data_f_mem;      //Data from the memory, used by lw/sw         
+    wire signed [0:15] data_f_mem_pc;   //Data at pc, flip bits, big endian is possibly easier for this 
   
-    reg [7:0]pc;                 //Program Counter in this module, no seperate module needed. Same as addr_to_mem most of the itme.
+    reg [7:0]pc;                        //Program Counter in this module, no seperate module needed. Same as addr_to_mem most of the itme.
     
     wire [3:0] first_bits, second_bits, third_bits, fourth_bits;
 
@@ -402,10 +418,9 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
     wire signed [15:0] alu_mux_rs1_input;
     wire signed [15:0] data_f_alu_rs1;
 
+    /* Forwarding signals */
     reg forward_enable_rs1_EX_ID, forward_enable_rs2_EX_ID; 
     reg forward_enable_rs1_MEM_ID, forward_enable_rs2_MEM_ID;
-
-    // reg RS1_MEM_ID_CYCLE_DELAY, RS2_MEM_ID_CYCLE_DELAY;
 
     wire ALUsrc;    //for rs2 input, 0 is rs2 is from rf, 1 if from immediete value in instruction
     
@@ -420,11 +435,10 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
     wire [7:0] pc_f_mem;
     wire reg_write_enable_f_mem;    //control write_enable for register file
     wire[3:0] rd_f_mem;
-    wire MemtoReg;  //control whether data is writing to memory or register file
+    wire MemtoReg;                  //control whether data is writing to memory or register file
     assign rf_mux_write_input_data = MemtoReg ? data_f_mem : alu_out_f_mem;
 
     wire signed [15:0] alu_mux_rs2_input;
-    wire signed [15:0] alu_mux_rs2_input_1; //delete later not used
     
     wire [1:0] alu_mux_rs1_select;
     assign alu_mux_rs1_select =  {forward_enable_rs1_EX_ID, forward_enable_rs1_MEM_ID};
@@ -440,8 +454,7 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
     reg [15:0] terminate_in_5;
 
     initial $monitor ("PC: %d, rs1_f_if %d, rs2_f_if %d, rd_f_if %d, rs1_f_rf %d, rs2_f_rf %d, rd_f_rf %d, rd_f_alu %d, alu_out %d, rs1_on_alu %d, rs2_on_alu %d" , pc, rs1_f_if, rs2_f_if, rd_f_if, rs1_f_rf,rs2_f_rf, rd_f_rf, rd_f_alu, alu_out, alu_mux_rs1_input, alu_mux_rs2_input  );
-
-    
+  
   IF instr_fetch (
       .clk                  (clk),
       .reset_n              (reset_n),
@@ -497,12 +510,10 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
       .reg_write_enable_f_mem(reg_write_enable_f_mem),
       .STALL                 (STALL),
       .STALL_FELL            (STALL_FELL),
-      .datastorage          (register_file_out),
-      .start                (start)
-    //   .forward_data_f_alu_rs1 (forward_data_f_alu_rs1),
-    //   .forward_data_f_alu_rs2 (forward_data_f_alu_rs2)
-      
+      .datastorage           (register_file_out),
+      .start                 (start)
   );
+
   ALU alu (
       .clk                    (clk),
       .reset_n                (reset_n),
@@ -525,11 +536,8 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
       .STALL                  (STALL),
       .STALL_FELL             (STALL_FELL),
       .start                  (start)
-    //   .forward_data_f_alu_rs1 (forward_data_f_alu_rs1),
-    //   .forward_data_f_alu_rs2 (forward_data_f_alu_rs2),
-    //   .forward_enable_rs1     (forward_enable_rs1),
-    //   .forward_enable_rs2     (forward_enable_rs2)
   );
+
   MEM memory2 (
       .clk                   (clk),
       .reset_n               (reset_n),
@@ -554,25 +562,17 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
       .start                 (start)
   );
 
-    // always @(posedge clk) begin
-    //     if(finished_o) begin
-    //         $finish;
-    //     end
-    // end
     always @(posedge clk, negedge reset_n) begin    
         
-
         if(!reset_n) begin
             pc<=0;
             forward_enable_rs1_EX_ID <= 0;
             forward_enable_rs2_EX_ID <= 0;
             forward_enable_rs1_MEM_ID <= 0;
             forward_enable_rs2_MEM_ID <= 0;
-            STALL<=0;
+            STALL <= 0;
             finished_o2 <= 0;
             terminate_in_5 <= 0;
-            // RS1_MEM_ID_CYCLE_DELAY <= 0;
-            // RS2_MEM_ID_CYCLE_DELAY <= 0;
         end
         
         else begin
@@ -591,7 +591,6 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                 
                 if(STALL_FELL) begin
                     STALL_FELL <= 0;
-                    //pc <= pc + 1;
                 end
                 
                 if(forward_enable_rs1_MEM_ID) begin
@@ -627,7 +626,6 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                 x2 is consumed line 2, EX_ID handles that instead. We are handling consumption of x2 on line 3. 
                 We also should make sure RD from line 1 and line 2 do not match. Otherwise EX_ID would handle this.
                 */
-
                     if(rd_f_alu == rs1_f_if && (rd_f_alu != rd_f_rf)) begin
                         forward_enable_rs1_MEM_ID <= 1;
                         $display("forward_enable_rs1_MEM_ID triggered\n");
@@ -692,7 +690,6 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                     forward_enable_rs2_EX_ID <= 0;
                     forward_enable_rs1_MEM_ID <= 0;
                     forward_enable_rs2_MEM_ID <= 0;
-                    
                 end
 
                 if(first_bits==4'b0101) begin
@@ -721,9 +718,7 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                 end
 
                 if(pc==10) begin
-                    
-                    //$finish;
-                    
+
                 end
             end
         end
