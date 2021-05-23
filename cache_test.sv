@@ -47,10 +47,11 @@ module tb();
         .mem_load_req(mem_load_req_f_cache),
         .mem_store_req(mem_store_req_f_cache),
         .mem_load_req_rdy(mem_load_req_rdy),
-        .mem_store_processed(mem_store_completed),
+        .mem_store_completed(mem_store_completed),
         .mem_store_ack(mem_store_ack),
         .mem_load_toggle(mem_load_toggle),
-        .address_to_mem(address_f_cache)
+        .address_to_mem(address_f_cache),
+        .data_f_mem(mem_data)
         );
 
     RAM simple_ram (
@@ -68,12 +69,18 @@ module tb();
 
     
     initial begin
+        activate = 0;
         #5;
         activate = 1;
-        #100
+        #50;
         address = 16'h0008;
         data = 16'hDEAD;
+
         #200;
+        instr_type = READ;
+        address = 16'h0028;
+        data = 16'hBEEF;
+        #300;
         $finish;
     end
     
@@ -102,7 +109,7 @@ module cache #(parameter CACHE_NUM_ROW = 8 /*Number of rows in the cache */
     output reg mem_load_req,        /*If high, need to load data from memory into cache*/
     output reg mem_store_req,       /*If high, need to save cache block to memory */
     output reg mem_store_ack,       /*If high, then the memory has succesfully stored */
-    input mem_store_processed,      /*If high, memory has stored 4 bytse from the cache block.*/
+    input mem_store_completed,      /*If high, memory has stored 4 bytse from the cache block.*/
     input mem_load_req_rdy,         /*If high, the data loaded from memory is ready */
     input mem_load_toggle,          /* This is not used, this would be if we needed to 'burst' the ram, aka if we needed multiple clock cycles to fill the cache block*/
     output reg [15:0] address_to_mem /*Address to memory, used when requesting data to load/store*/
@@ -115,8 +122,8 @@ module cache #(parameter CACHE_NUM_ROW = 8 /*Number of rows in the cache */
     reg [15:0] block_num;           /* We will modulo the block addres by cache size to get the column */
     reg [7:0] to_evict;             /* If any of the bits are set, the cache block should be written to memory and freed from the cache */
 
-    parameter BL_NUM_BYTES = 4; /*Number of bytes in a block, aka number of columns */
-    reg read_success = 0;   
+    parameter BL_NUM_BYTES = 4;     /* Number of bytes in a block, aka number of columns */
+    reg read_success = 0;           /* If high, we have successfully read from memory */   
 
     task send_to_mem (input int i);
         begin
@@ -125,13 +132,13 @@ module cache #(parameter CACHE_NUM_ROW = 8 /*Number of rows in the cache */
            mem_store_req = 1;
            address_to_mem = address_in;
            $display("%0t", $time);
-           wait(mem_store_processed == 1) begin /* We will wait until memory has completed the store */
+           wait(mem_store_completed == 1) begin /* We will wait until memory has completed the store */
                $display("Memory store has been processed - from cache");
                $display("%0t", $time);
-               mem_store_ack = 1;   /* We tell the memory that we ack the store, so now it can turn off its write enable*/ 
+               //mem_store_ack = 1;   /* We tell the memory that we ack the store, so now it can turn off its write enable*/ 
                mem_store_req = 0;   /* We do not have a request anymore */
-               wait(mem_store_processed == 0) begin /* We will wait until the memory is able to store new data*/
-                   mem_store_ack = 0;   /* We are done acknowledging that the memory has stored the cache block */
+               wait(mem_store_completed == 0) begin /* We will wait until the memory is able to store new data*/
+                   //mem_store_ack = 0;   /* We are done acknowledging that the memory has stored the cache block */
                    $display("Memory store has fully completed - from cache");
                    $display("%0t", $time);
                end
@@ -140,8 +147,16 @@ module cache #(parameter CACHE_NUM_ROW = 8 /*Number of rows in the cache */
     endtask
 
     always@(*) begin
+        
+        if(!activate) begin
+            /* If we are not activated, set the vld bits to 0 */
+            for(int i = 0; i < 8; i++) begin
+                vld[i] = 0;
+            end
+        end
 
         if(activate) begin
+            $display("instr type is %d", instr_type);
             if(address_in % 2 != 0) begin
                 $display("Address needs to be word aligned (divisible by 2) for now");
                 $display("This most likely means to load a byte. If address 0x03, we should actually load word at 0x02. Then only return the upper 8 bits");
@@ -149,13 +164,15 @@ module cache #(parameter CACHE_NUM_ROW = 8 /*Number of rows in the cache */
             end
 
             block_address = address_in / BL_NUM_BYTES; /* divide by number of columns to find the row # */
-            block_num = block_address % CACHE_NUM_ROW; /* modulo to get the physical row number */ 
+            block_num = block_address % CACHE_NUM_ROW; /* modulo to get the physical row number (since the cache_line numbers roll over) */ 
             $display("block_address is %d", block_address );
             $display("block_num is %d", block_num);
 
             /* Let's assume a load */
             if(instr_type == READ) begin
+                $display("Got a read instruction");
                 if(vld[block_num] == 1) begin
+                    $display("vld[block_num] passed");
                     if(tag_number[block_num] == address_in[15:5]) begin
                         read_success = 1;
                         if(address_in % 4 == 0) begin
@@ -166,16 +183,28 @@ module cache #(parameter CACHE_NUM_ROW = 8 /*Number of rows in the cache */
                         end
                     end
                 end
+
                 if(read_success == 0) begin
+                    $display("The tag did not match the address, going to memory");
                     /* We want to read the whole cache line from memory, since the memory has a 32 bit output, this is easy */
                     mem_load_req = 1;
+                    address_to_mem = address_in;
                     wait (mem_load_req_rdy == 1) begin
                         cache_data[block_num] = data_f_mem;
+                        $display("inside read, data_f_mem is %h", data_f_mem);
                     end 
+                    
+                    if(address_in % 4 == 0) begin
+                        data_out = cache_data[block_num][15:0];
+                    end 
+                    else if(address_in % 2 == 2) begin
+                        data_out = cache_data[block_num][31:16];
+                    end
+
                     vld[block_num] = 1;
                     tag_number[block_num] = address_in[15:5];
-                    
                 end
+                $display("Read data from ram, data_out from cache is %h", data_out);
             end
 
             /* Let's assume a store */
@@ -190,6 +219,7 @@ module cache #(parameter CACHE_NUM_ROW = 8 /*Number of rows in the cache */
                 else if (vld[block_num == 1]) begin
                     /* If data is already present in this cache line, and we are writing to it
                        We should evict the current data first */
+                       $display("block is already valid, sending old cache line to memory");
                        send_to_mem(block_num);
                 end
 
@@ -240,14 +270,23 @@ module RAM
 
 reg [D_WIDTH-1:0] mem [0:(2**WIDTH_AD)-1];
 
-always @(posedge clk) begin
-    if(store_ack) begin
-        mem[address_in] <= data_in;
-        store_completed <= 0;   /*We need to tell the cache to continue */
+/* This is just for simulation, put a number in each memory location */
+initial begin
+    for(int i = 0; i < (2**WIDTH_AD); i++) begin
+        mem[i] = i;
     end
-    else if(wren) begin 
+end
+
+always @(posedge clk) begin
+    // if(store_ack) begin
+    //     mem[address_in] <= data_in;
+    //     store_completed <= 0;   /*We need to tell the cache to continue */
+    // end
+    if(wren) begin 
         mem[address_in] <= data_in;
         store_completed <= 1;
+    end else begin
+        store_completed <= 0;
     end
 
     if(mem_load_req) begin      /* If the cache requests a cache block sized data*/
