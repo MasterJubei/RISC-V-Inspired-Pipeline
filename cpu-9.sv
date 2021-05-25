@@ -9,7 +9,7 @@ module tb;
     wire [15:0] register_file [15:0];
 
     initial begin
-    $readmemb("instructions3.mem", instructions); 
+    $readmemb("instructions4.mem", instructions); 
     end
     reg reset_n,clock, valid_n, start;
     wire finished;
@@ -133,7 +133,7 @@ module IF(
                     ALUsrc_f_if<=0;
                 end
     
-                if(first_bits==4'b0001) begin   //sw
+                if(first_bits==4'b0001) begin   //store word, sw x3, 0(x2), rs1 = x2    rs2/im = 0      rd = x3
                     is_immed_f_if <= 1;
                     mem_write_enable_f_if <= 1;
                     reg_write_enable_f_if <= 0;
@@ -178,6 +178,7 @@ module RF2 (
     input[3:0] if_request_out_1, if_request_out_2, waddr, 
     input [15:0] rf_write_input_data, 
     output reg [15:0] rf_data_1, rf_data_2,
+    output reg [15:0] rf_data_rd, /* This is used in SW */
     input STALL, STALL_FELL, 
     input start,
     output reg [15:0] datastorage [15:0]
@@ -219,8 +220,9 @@ module RF2 (
             /* Get the data of pointed by RS1 and RS2 from the RF */
             rf_data_1 <= datastorage[if_request_out_1];
             rf_data_2 <= datastorage[if_request_out_2];
-
-            /* Due to timing, we can't just forward the data from the IF stage when stalled (that would be a cycle late) */
+            rf_data_rd <= datastorage[rd_f_if]; /* This is used in SW, the last 4 bits of the instruction (rd) is the register to store at the address  */
+            
+            /* If we are stalled, we do not want to commit the instruction (they are garbage data) */
             if(STALL) begin
                 reg_write_enable_f_rf <= 0;
                 mem_write_enable_f_rf <= 0;
@@ -256,8 +258,10 @@ module ALU(
     output reg [3:0] opcode_f_alu, rd_f_alu,
     output reg reg_write_enable_f_alu, mem_write_enable_f_alu,  
     input [15:0] alu_input_rs1, alu_input_rs2, 
+    input [15:0] alu_input_rd,
     output reg [15:0]alu_out,
     output reg [15:0] data_f_alu_rs1,
+    output reg [15:0] data_f_alu_rd,
     input STALL, STALL_FELL,
     input start
     );
@@ -275,7 +279,8 @@ module ALU(
             opcode_f_alu <= opcode_f_rf;
             rd_f_alu <= rd_f_rf;
             data_f_alu_rs1 <= alu_input_rs1;
-
+            data_f_alu_rd <= alu_input_rd;
+            $display("alu printing data_f_alu_rd", alu_input_rd);
             /* Checking the opcode again for the operation */
             
             if(opcode_f_rf==4'b0100) begin    // add, add x1, x2, x3     rs1 = x2, rs2 = x3, rd=x1
@@ -339,8 +344,8 @@ module MEM(
     );
 
     reg [15:0] instructions [0:256];    /* Instruction Memory */
-    //reg [15:0] memory [0:256];
-    reg [7:0] memory2 [0:1024];         /* We will make the memory 8 bits long instead */
+    reg [15:0] memory [0:1024];
+    //reg [7:0] memory2 [0:1024];         /* We will make the memory 8 bits long instead */
     reg [7:0] instruction_counter;      /* We have a seperate counter for loading instructions
                                            We use the pc in normal operation */
     
@@ -359,15 +364,17 @@ module MEM(
             end else if(start) begin
                 /*Forward data from previous stages */
                 reg_write_enable_f_mem <= reg_write_enable_f_alu;
-                data_out <= { memory2[addr+1], memory2[addr] };
+                data_out <= memory[addr];
+                //data_out <= { memory2[addr+1], memory2[addr] };
                 pc_f_mem <= pc_f_alu;
                 rd_f_mem <= rd_f_alu;
                 alu_out_f_mem <= alu_out;
         
                 if(write_enable) begin
-                    //memory[addr] <= data_in;
-                    memory2[addr] <= data_in[7:0];
-                    memory2[addr+1] <= data_in[15:8];
+                    $display("data in is %h", data_in);
+                    memory[addr] <= data_in;
+                    //memory2[addr] <= data_in[7:0];
+                    //memory2[addr+1] <= data_in[15:8];
                 end
 
                 if(opcode_f_alu==4'b0000) begin
@@ -415,6 +422,7 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
     wire signed [15:0] write_data_f_alu;
     wire signed [15:0] data_f_rf_rs1;
     wire signed [15:0] data_f_rf_rs2;
+    wire signed [15:0] data_f_rf_rd;
     wire signed [15:0] alu_mux_rs1_input;
     wire signed [15:0] data_f_alu_rs1;
 
@@ -430,6 +438,7 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
     wire signed [15:0] alu_out;
     wire signed [15:0] rf_write_input_data;
     wire signed [15:0] rf_mux_write_input_data;
+    wire signed [15:0] data_f_alu_rd;
     
     wire signed [15:0] alu_out_f_mem;
     wire [7:0] pc_f_mem;
@@ -507,6 +516,7 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
       .rf_write_input_data   (rf_mux_write_input_data),
       .rf_data_1             (data_f_rf_rs1),
       .rf_data_2             (data_f_rf_rs2),
+      .rf_data_rd            (data_f_rf_rd),
       .reg_write_enable_f_mem(reg_write_enable_f_mem),
       .STALL                 (STALL),
       .STALL_FELL            (STALL_FELL),
@@ -533,6 +543,8 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
       .alu_out                (alu_out),
       .is_jump_f_rf           (is_jump_f_rf),
       .data_f_alu_rs1         (data_f_alu_rs1),
+      .alu_input_rd           (data_f_rf_rd),
+      .data_f_alu_rd          (data_f_alu_rd),
       .STALL                  (STALL),
       .STALL_FELL             (STALL_FELL),
       .start                  (start)
@@ -542,7 +554,7 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
       .clk                   (clk),
       .reset_n               (reset_n),
       .addr                  (alu_out),
-      .data_in               (data_f_alu_rs1),
+      .data_in               (data_f_alu_rd),
       .pc_f_alu              (pc_f_alu),
       .pc_f_mem              (pc_f_mem),
       .write_enable          (mem_write_enable_f_alu),
@@ -562,10 +574,23 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
       .start                 (start)
   );
 
+/* lw x1, 0(x2) //load into x1, the address in x2 
+   add x2, x1, x1, need to stall here */
+
+  always @(*) begin
+      if(opcode_f_alu == 4'b0000 && (rd_f_alu == rs1_f_rf || rd_f_alu == rs2_f_rf)) begin
+        STALL = 1;
+        $display("Stall activated");
+      end else begin
+          STALL = 0;
+          $display("Stall deactivated");
+      end
+  end
+
     always @(posedge clk, negedge reset_n) begin    
         
         if(!reset_n) begin
-            pc<=0;
+            pc <= 0;
             forward_enable_rs1_EX_ID <= 0;
             forward_enable_rs2_EX_ID <= 0;
             forward_enable_rs1_MEM_ID <= 0;
@@ -581,17 +606,17 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
 
             if(start) begin
 
-                if(STALL) begin
-                    STALL <= 0;
-                    STALL_FELL <= 1;
-                end
+                // if(STALL) begin
+                //     STALL <= 0;
+                //     STALL_FELL <= 1;
+                // end
 
                 if(!STALL && !finished_internal) 
                     pc <= pc + 1;
                 
-                if(STALL_FELL) begin
-                    STALL_FELL <= 0;
-                end
+                // if(STALL_FELL) begin
+                //     STALL_FELL <= 0;
+                // end
                 
                 if(forward_enable_rs1_MEM_ID) begin
                     //RS1_MEM_ID_CYCLE_DELAY <= 1;
@@ -653,10 +678,10 @@ module router(input clk, input reset_n, input [15:0] instruction, input valid_n,
                 begin   
                     //$display("Inside trigger loops\n");
 
-                    if(opcode_f_rf == 4'b0000 && (rd_f_rf == rs1_f_if || rd_f_rf == rs2_f_if)) begin
-                        $display("\nSTALL ACTIVE\n");
-                        STALL<=1;
-                    end
+                    // if(opcode_f_rf == 4'b0000 && (rd_f_rf == rs1_f_if || rd_f_rf == rs2_f_if)) begin
+                    //     $display("\nSTALL ACTIVE\n");
+                    //     STALL<=1;
+                    // end
                     if(!forward_disable) begin
                         /*Forwarding support, distance of 1. We are looking from IF output to RF output
                         This data then will take priority over the stale copy 

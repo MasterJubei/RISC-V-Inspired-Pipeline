@@ -163,8 +163,8 @@ module cache #(parameter CACHE_NUM_ROW = 8 /*Number of rows in the cache */
                 $finish;
             end
 
-            block_address = address_in / BL_NUM_BYTES; /* divide by number of columns to find the row # */
-            block_num = block_address % CACHE_NUM_ROW; /* modulo to get the physical row number (since the cache_line numbers roll over) */ 
+            block_address = address_in / BL_NUM_BYTES; /* divide by number of columns to find the row, aka block address # */
+            block_num = block_address % CACHE_NUM_ROW; /* modulo to get the physical row number (since the block address can be bigger than the block number ) */ 
             $display("block_address is %d", block_address );
             $display("block_num is %d", block_num);
 

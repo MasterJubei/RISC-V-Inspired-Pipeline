@@ -1,0 +1,10 @@
+//Mainly a stall test
+//initial values
+0001000100000010 //sw x2, 0(x1)
+0101010001000100 //sub x4, x4, x4
+0101010101010101 //sub x5, x5 ,x5
+0101011001100110 // sub x6, x6, x6
+0101011101110111 // sub x7, x7, x7
+0000000100000100 //lw x4, 0(x1)    // should get the value x2 (300)
+0100010001010101 //add x5, x4, x5  //should have 300 in x5
+1111111111111111    //halt 
