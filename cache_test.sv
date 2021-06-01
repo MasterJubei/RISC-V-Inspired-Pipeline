@@ -71,12 +71,18 @@ module tb();
     initial begin
         activate = 0;
         #5;
+
+        /*tag = 0, block_num = 1, offset = 0 */
         activate = 1;
+        address = 16'h0004;
+        data = 16'h0100;
         #50;
+
+        /*tag = 0, block_num = 2, offset = 0 */
         address = 16'h0008;
         data = 16'hDEAD;
-
         #200;
+
         instr_type = READ;
         address = 16'h0028;
         data = 16'hBEEF;

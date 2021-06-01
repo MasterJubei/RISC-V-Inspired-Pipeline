@@ -1,5 +1,4 @@
 `default_nettype none
-`timescale 1ns/10ps
 
 typedef enum {READ, WRITE} INSTR_TYPE;
 
@@ -10,15 +9,11 @@ module tb();
     end
     
     reg clk = 0;
-    reg [15:0] address = 16'h0004;
-    reg [15:0] data = 16'h0100;
+    reg [15:0] address = 0;
+    reg [15:0] data = 0;
     reg [15:0] data_f_dut;
     reg activate = 0;
-    //wire wren = 0; /* If high, memory should write cache block */ 
     
-    wire load_ready_f_mem;
-    
-
     wire[31:0] block_f_cache;
     wire mem_load_req_f_cache;
     wire mem_store_req_f_cache;
@@ -77,9 +72,15 @@ module tb();
     
     initial begin
         activate = 0;
+
         #5;
+        /*tag = 0, block_num = 1, offset = 0 */
         activate = 1;
+        address = 16'h0004;
+        data = 16'h0100;
+        
         #50;
+        /*tag = 0, block_num = 2, offset = 0 */
         address = 16'h0008;
         data = 16'hDEAD;
 
@@ -90,7 +91,6 @@ module tb();
         #300;
         $finish;
     end
-    
     
 endmodule
 
@@ -114,15 +114,15 @@ module cache #(
     input activate,
     input INSTR_TYPE instr_type,   // 0 = read, 1 = write
 
-    output reg [31:0] data_to_mem,  /*The data(cache block) that should be saved from the cache to memory */
-    input [31:0] data_f_mem,        /*The data from memory that will go in a cache block*/
-    output reg mem_load_req,        /*If high, need to load data from memory into cache*/
-    output reg mem_store_req,       /*If high, need to save cache block to memory */
-    output reg mem_store_ack,       /*If high, then the memory has succesfully stored */
-    input mem_store_completed,      /*If high, memory has stored 4 bytse from the cache block.*/
-    input mem_load_req_rdy,         /*If high, the data loaded from memory is ready */
-    input mem_load_toggle,          /* This is not used, this would be if we needed to 'burst' the ram, aka if we needed multiple clock cycles to fill the cache block*/
-    output reg [15:0] address_to_mem /*Address to memory, used when requesting data to load/store*/
+    output reg [31:0] data_to_mem,      /*The data(cache block) that should be saved from the cache to memory */
+    input [31:0] data_f_mem,            /*The data from memory that will go in a cache block*/
+    output reg mem_load_req,            /*If high, need to load data from memory into cache*/
+    output reg mem_store_req,           /*If high, need to save cache block to memory */
+    output reg mem_store_ack,           /*If high, then the memory has succesfully stored */
+    input mem_store_completed,          /*If high, memory has stored 4 bytse from the cache block.*/
+    input mem_load_req_rdy,             /*If high, the data loaded from memory is ready */
+    input mem_load_toggle,              /* This is not used, this would be if we needed to 'burst' the ram, aka if we needed multiple clock cycles to fill the cache block*/
+    output reg [15:0] address_to_mem    /*Address to memory, used when requesting data to load/store*/
     
 ); 
     //reg vld [0:7];                                /* 1 bit for each row  */
@@ -139,10 +139,13 @@ module cache #(
     reg read_success = 0;                           /* If high, we have successfully read from memory */   
     reg [3:0] LRU [0:7][4];                         /* Used to keep track of the oldest column in the set. The oldest gets evicted*/
 
-    task send_to_mem (input byte i);
+    task send_to_mem (
+        input byte row, 
+        input set_col 
+        );
         begin
-           data_to_mem = cache_data[i];
-           $display("Cache data[%d] is %h", i, cache_data[i]);
+           data_to_mem = cache_data[row][set_col];
+           $display("Send to mem, data[%d][%d] is %h", row, set_col , cache_data[row][set_col]);
            mem_store_req = 1;
            address_to_mem = address_in;
            $display("%0t", $time);
@@ -160,21 +163,9 @@ module cache #(
         end
     endtask
 
-    // /* Check if any of the sets in the block num are vld */
-    // task automatic set_is_vld(input byte row,
-    // output vld_bool ); 
-    // reg state = 0;
-    //     begin
-    //         for(int i = 0; i < CACHE_NUM_SET; i++) begin
-    //             if(vld_set[block_num][i] == 1 && state == 0) begin
-    //                 vld_bool = 1;
-    //                 state = 1;
-    //             end
-    //         end
-    //     end
-    // endtask
 
-    /* Check if any of the sets in the block num are vld and the tag matches */
+    /* This task checks if any of the sets columns in the block_num are vld and the tag matches 
+        Used to check if our data is already in the cache */
     task automatic set_tag_match(
     input byte row,
     input [10:0] tag,
@@ -197,6 +188,8 @@ module cache #(
         end
     endtask
 
+    /* This task finds an empty column in the set 
+       Used to find if there is an empty when writing, (if there isn't we call find_oldest_set_col instead, but not here) */
     task automatic find_space_in_set(
         input byte row,
         output space_found,
@@ -205,19 +198,21 @@ module cache #(
     reg state = 0;
     begin
         for(int i = 0; i < CACHE_NUM_SET; i++) begin
-            if(vld_set[row][i] == 0) begin
+            if(vld_set[row][i] == 0 && state == 0) begin
                 space_found = 1;
                 set_num = i;
+                state = 1;
             end
         end 
+        $display("find_space_in_set - space_found at col %d", set_num);
     end
     endtask
 
     /* This tasks finds the oldest value in the set in the cache. 
-    Then sends that value to be written to memory. */
-    task automatic send_oldest_to_mem(
+       This is used when there are no free columns in the set, we make room by ejecting the oldest value in the set */
+    task automatic find_oldest_set_col(
         input byte row,
-        output set_num_freed
+        output oldest_set_col
     );
     reg highest_index = 0;
     reg [3:0] highest_val;
@@ -228,14 +223,10 @@ module cache #(
             highest_index = i;
         end
     end
-
-    send_to_mem(block_num, highest_index);
-    
     endtask
     
 
-
-    always@(*) begin
+    always@(activate, address_in, data_in, instr_type) begin
         
         if(!activate) begin
             /* If we are not activated, set the vld bits to 0 */
@@ -247,7 +238,7 @@ module cache #(
         end
 
         if(activate) begin
-            $display("instr type is %d", instr_type);
+            $display("instr type is %d, time is: %0t", instr_type, $time);
             if(address_in % 2 != 0) begin
                 $display("Address needs to be word aligned (divisible by 2) for now");
                 $display("This most likely means to load a byte. If address 0x03, we should actually load word at 0x02. Then only return the upper 8 bits");
@@ -319,7 +310,6 @@ module cache #(
                 $display("Got a write instruction");
 
                 find_space_in_set(block_num, space_found_st, set_num_st);
-
                 if(space_found_st) begin
                     vld_set[block_num][set_num_st] = 1;
                     cache_data[block_num][set_num_st] = '0;
@@ -330,7 +320,9 @@ module cache #(
                     /* If data is already present in this cache line, and we are writing to it and there is no free space in the set
                        We should evict the current set data first */
                        $display("block is already valid, sending old cache line to memory");
-                       send_to_mem(block_num);
+                       find_oldest_set_col(block_num, set_num_st);
+                       send_to_mem(block_num, set_num_st); 
+                       //send_to_mem(block_num);
                 end
 
                 if(address_in % 4 == 0) begin
@@ -342,20 +334,20 @@ module cache #(
                 end
             end
 
-            /* Let's write a cache block to memory */
-            to_evict[block_num] = 1;
+            // /* Let's write a cache block to memory */
+            // to_evict[block_num] = 1;
             
-            for(int i = 0; i < CACHE_NUM_ROW; i++ ) begin
-                if(to_evict[i] == 1) begin
-                    send_to_mem(i);
-                end
-            end
+            // for(int i = 0; i < CACHE_NUM_ROW; i++ ) begin
+            //     if(to_evict[i] == 1) begin
+            //         send_to_mem(i);
+            //     end
+            // end
 
-            to_evict[block_num] = 0;    
-
+            // to_evict[block_num] = 0;    
+            $display("--------------");
             read_success = 0;
-            $display("Block number is %d", block_num);
-            $display("Data at cache_data[block_num] is %h", cache_data[block_num]);
+            // $display("Block number is %d", block_num);
+            // $display("Data at cache_data[block_num] is %h", cache_data[block_num]);
 
         end
 end
