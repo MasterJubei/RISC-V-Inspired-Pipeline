@@ -101,9 +101,10 @@ module cache_controller(
 endmodule
 
 module cache #(
-    parameter CACHE_NUM_ROW = 8, /*Number of rows in the cache */
-    parameter CACHE_NUM_SET = 4  /* Number of sets per row in the cache */
-
+    parameter CACHE_NUM_ROW = 8,                        /* Number of rows in the cache */
+    parameter CACHE_NUM_SET = 4,                        /* Number of sets per row in the cache */
+    parameter LRU_BPS = 4,                              /* LRU Bits per set, How many bits allocated for the staleness of each set in the LRU */
+    parameter LRU_BPS_SQRD = LRU_BPS * LRU_BPS - 1     /* Max value of 4 bits */
     //parameter WIDTH_AD   = 8
     )
     (
@@ -125,11 +126,9 @@ module cache #(
     output reg [15:0] address_to_mem    /*Address to memory, used when requesting data to load/store*/
     
 ); 
-    //reg vld [0:7];                                /* 1 bit for each row  */
     reg vld_set [0:7] [4];                          /* 1 bit for each set  */
-    reg [31:0] cache_data [0:7] [4];                 /* If you load address 0x02, get the data for 0x00 as well in the cache. If you grab 0x00, also get 0x02 */
-    //reg [10:0] tag_number [0:7];                  /* We have a tag number for each cache line */
-    reg [10:0] tag_number_set [0:7] [4];            /* We have a tag number for each set in the cache line */
+    reg [31:0] cache_data [0:7] [4];                /* If you load address 0x02, get the data for 0x00 as well in the cache. If you grab 0x00, also get 0x02 */
+    reg [10:0] tag_number_set [0:7] [4];            /* We have a tag number for each set in the cache block */
     reg [15:0] block_address;                       /* We will divide address by cache size to get block address */ 
     reg [15:0] block_num;                           /* We will modulo the block addres by cache size to get the column */
     
@@ -162,7 +161,6 @@ module cache #(
            end
         end
     endtask
-
 
     /* This task checks if any of the sets columns in the block_num are vld and the tag matches 
         Used to check if our data is already in the cache */
@@ -224,8 +222,28 @@ module cache #(
         end
     end
     endtask
-    
 
+    /* This task adds 1 to every entry in the LRU unless it is already at the max value(15 for now)
+       It will then make the set being accessed have its value changed to 0  */
+    task automatic update_lru(
+        input byte row,
+        input set_num
+    );
+        /*  Increase the staleness value by 1 for each entry in the LRU 
+            Not checking if it is VLD, it is probablyfaster to just add blindly 
+        */
+        for(int i = 0; i < CACHE_NUM_ROW; i++) begin
+            for(int j = 0; j < CACHE_NUM_SET; j++) begin
+                if(LRU[i][j] != LRU_BPS_SQRD ) begin
+                    LRU[i][j] = LRU[i][j] + 1;
+                end
+            end
+        end
+        /* Reset the staleness value for the value that was just accssed */
+        LRU[row][set_num] = 0;
+    endtask
+    
+    /* Limited trigger list, want to avoid this getting called unnecessarily. Hopefully nothing bad happens! */
     always@(activate, address_in, data_in, instr_type) begin
         
         if(!activate) begin
@@ -271,6 +289,8 @@ module cache #(
                     else if(address_in % 4 == 2) begin
                         data_out = cache_data[block_num][set_num_stm][31:16];
                     end
+                    /* Increase the staleness for every value in the LRU and reset the one just accessed */
+                    update_lru(block_num, set_num_stm);
                 end
 
                 if(read_success == 0) begin
@@ -296,7 +316,8 @@ module cache #(
 
                         vld_set[block_num][set_num_fsis] = 1;
                         tag_number_set[block_num][set_num_fsis] = address_in[15:5];
-
+                        /* Increase the staleness for every value in the LRU and reset the one just accessed */
+                        update_lru(block_num, set_num_fsis);
                     end
                 end
                 $display("Read data from ram, data_out from cache is %h", data_out);
@@ -318,11 +339,10 @@ module cache #(
 
                 else if(space_found_st == 0) begin
                     /* If data is already present in this cache line, and we are writing to it and there is no free space in the set
-                       We should evict the current set data first */
-                       $display("block is already valid, sending old cache line to memory");
-                       find_oldest_set_col(block_num, set_num_st);
-                       send_to_mem(block_num, set_num_st); 
-                       //send_to_mem(block_num);
+                    We should evict the current set data first */
+                    $display("block is already valid, sending old cache line to memory");
+                    find_oldest_set_col(block_num, set_num_st);
+                    send_to_mem(block_num, set_num_st); 
                 end
 
                 if(address_in % 4 == 0) begin
@@ -332,23 +352,13 @@ module cache #(
                 else if(address_in % 4 == 2) begin
                     cache_data[block_num][set_num_st][31:16] = data_in;
                 end
+
+                /* Increase the staleness for every value in the LRU and reset the one just accessed */
+                update_lru(block_num, set_num_st);
             end
-
-            // /* Let's write a cache block to memory */
-            // to_evict[block_num] = 1;
             
-            // for(int i = 0; i < CACHE_NUM_ROW; i++ ) begin
-            //     if(to_evict[i] == 1) begin
-            //         send_to_mem(i);
-            //     end
-            // end
-
-            // to_evict[block_num] = 0;    
-            $display("--------------");
             read_success = 0;
-            // $display("Block number is %d", block_num);
-            // $display("Data at cache_data[block_num] is %h", cache_data[block_num]);
-
+            $display("--------------");
         end
 end
 endmodule
