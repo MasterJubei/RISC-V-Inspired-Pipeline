@@ -189,7 +189,7 @@ module cache #(
     endtask
 
     /* This task finds an empty column in the set 
-       Used to find if there is an empty when writing, (if there isn't we call find_oldest_set_col instead, but not here) */
+       Used to find if there is an empty column when writing, (if there isn't we call find_oldest_set_col instead, but not here) */
     task automatic find_space_in_set(
         input byte row,
         output space_found,
@@ -268,7 +268,7 @@ module cache #(
                     if(address_in % 4 == 0) begin
                         data_out = cache_data[block_num][set_num_stm][15:0];
                     end 
-                    else if(address_in % 2 == 2) begin
+                    else if(address_in % 4 == 2) begin
                         data_out = cache_data[block_num][set_num_stm][31:16];
                     end
                 end
@@ -290,7 +290,7 @@ module cache #(
                         if(address_in % 4 == 0) begin
                             data_out = cache_data[block_num][set_num_fsis][15:0];
                         end 
-                        else if(address_in % 2 == 2) begin
+                        else if(address_in % 4 == 2) begin
                             data_out = cache_data[block_num][set_num_fsis][31:16];
                         end
 
@@ -329,7 +329,7 @@ module cache #(
                     cache_data[block_num][set_num_st][15:0] = data_in;
                 end
 
-                else if(address_in % 2 == 0) begin
+                else if(address_in % 4 == 2) begin
                     cache_data[block_num][set_num_st][31:16] = data_in;
                 end
             end

@@ -184,7 +184,7 @@ module cache #(parameter CACHE_NUM_ROW = 8 /*Number of rows in the cache */
                         if(address_in % 4 == 0) begin
                             data_out = cache_data[block_num][15:0];
                         end 
-                        else if(address_in % 2 == 2) begin
+                        else if(address_in % 4 == 2) begin
                             data_out = cache_data[block_num][31:16];
                         end
                     end
@@ -203,7 +203,7 @@ module cache #(parameter CACHE_NUM_ROW = 8 /*Number of rows in the cache */
                     if(address_in % 4 == 0) begin
                         data_out = cache_data[block_num][15:0];
                     end 
-                    else if(address_in % 2 == 2) begin
+                    else if(address_in % 4 == 2) begin
                         data_out = cache_data[block_num][31:16];
                     end
 
@@ -233,7 +233,7 @@ module cache #(parameter CACHE_NUM_ROW = 8 /*Number of rows in the cache */
                     cache_data[block_num][15:0] = data_in;
                 end
 
-                else if(address_in % 2 == 0) begin
+                else if(address_in % 4 == 2) begin
                     cache_data[block_num][31:16] = data_in;
                 end
             end
