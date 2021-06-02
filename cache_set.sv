@@ -3,11 +3,6 @@
 typedef enum {READ, WRITE} INSTR_TYPE;
 
 module tb();
-    reg[15:0] instructions [0:31];
-    initial begin
-    $readmemb("instructions3.mem", instructions); 
-    end
-    
     reg clk = 0;
     reg [15:0] address = 0;
     reg [15:0] data = 0;
@@ -19,9 +14,9 @@ module tb();
     wire mem_store_req_f_cache;
     wire mem_load_req_rdy;
     wire mem_load_toggle;       /* This toggles back and forward when loading a cache block */
-    wire mem_store_completed;   /*Memory confirming it has stored cache block */
-    wire mem_store_ack;         /*Cache confirming it has ack the cache block write */
-    wire [31:0] mem_data;       /*Cache block from memory*/
+    wire mem_store_completed;   /* Memory confirming it has stored cache block */
+    wire mem_store_ack;         /* Cache confirming it has ack the cache block write */
+    wire [31:0] mem_data;       /* Cache block from memory*/
 
     wire [15:0] address_f_cache;
 
@@ -69,7 +64,6 @@ module tb();
         .load_toggle (mem_load_toggle)
     );
 
-    
     initial begin
         activate = 0;
 
@@ -85,9 +79,24 @@ module tb();
         data = 16'hDEAD;
 
         #200;
+        /*tag = 1, block_num = 2, offset = 0*/
         instr_type = READ;
         address = 16'h0028;
         data = 16'hBEEF;
+        
+        #100;
+        /* tag = 3, block_num = 2, offset = 0 */
+        instr_type = WRITE;
+        address = 16'h0068;
+        data = 16'hf01d;
+
+        #100;
+        /* tag = 4, block_num = 2, offset = 0 */
+        instr_type = WRITE;
+        address = 16'h0088;
+        data = 16'hf01d;
+
+
         #300;
         $finish;
     end
@@ -115,15 +124,15 @@ module cache #(
     input activate,
     input INSTR_TYPE instr_type,   // 0 = read, 1 = write
 
-    output reg [31:0] data_to_mem,      /*The data(cache block) that should be saved from the cache to memory */
-    input [31:0] data_f_mem,            /*The data from memory that will go in a cache block*/
-    output reg mem_load_req,            /*If high, need to load data from memory into cache*/
-    output reg mem_store_req,           /*If high, need to save cache block to memory */
-    output reg mem_store_ack,           /*If high, then the memory has succesfully stored */
-    input mem_store_completed,          /*If high, memory has stored 4 bytse from the cache block.*/
-    input mem_load_req_rdy,             /*If high, the data loaded from memory is ready */
+    output reg [31:0] data_to_mem,      /* The data(cache block) that should be saved from the cache to memory */
+    input [31:0] data_f_mem,            /* The data from memory that will go in a cache block*/
+    output reg mem_load_req,            /* If high, need to load data from memory into cache*/
+    output reg mem_store_req,           /* If high, need to save cache block to memory */
+    output reg mem_store_ack,           /* If high, then the memory has succesfully stored */
+    input mem_store_completed,          /* If high, memory has stored 4 bytes from the cache block.*/
+    input mem_load_req_rdy,             /* If high, the data loaded from memory is ready */
     input mem_load_toggle,              /* This is not used, this would be if we needed to 'burst' the ram, aka if we needed multiple clock cycles to fill the cache block*/
-    output reg [15:0] address_to_mem    /*Address to memory, used when requesting data to load/store*/
+    output reg [15:0] address_to_mem    /* Address to memory, used when requesting data to load/store*/
     
 ); 
     reg vld_set [0:7] [4];                          /* 1 bit for each set  */
@@ -132,8 +141,6 @@ module cache #(
     reg [15:0] block_address;                       /* We will divide address by cache size to get block address */ 
     reg [15:0] block_num;                           /* We will modulo the block addres by cache size to get the column */
     
-    reg [7:0] to_evict;                             /* If any of the bits are set, the cache block should be written to memory and freed from the cache */
-
     parameter BL_NUM_BYTES = 4;                     /* Number of bytes in a block, aka number of columns */
     reg read_success = 0;                           /* If high, we have successfully read from memory */   
     reg [3:0] LRU [0:7][4];                         /* Used to keep track of the oldest column in the set. The oldest gets evicted*/
@@ -167,8 +174,8 @@ module cache #(
     task automatic set_tag_match(
     input byte row,
     input [10:0] tag,
-    output vld_bool,
-    output set_num); 
+    output reg vld_bool,
+    output reg [1:0] set_num); 
     reg state = 0;
         begin
             for(int i = 0; i < CACHE_NUM_SET; i++) begin
@@ -190,19 +197,21 @@ module cache #(
        Used to find if there is an empty column when writing, (if there isn't we call find_oldest_set_col instead, but not here) */
     task automatic find_space_in_set(
         input byte row,
-        output space_found,
-        output set_num
+        output reg space_found,
+        output reg[1:0] set_num
     );
     reg state = 0;
     begin
+        
         for(int i = 0; i < CACHE_NUM_SET; i++) begin
             if(vld_set[row][i] == 0 && state == 0) begin
                 space_found = 1;
                 set_num = i;
                 state = 1;
+                $display("find_space_in_set - space at vld_set[%d][%d]", row, i);
             end
         end 
-        $display("find_space_in_set - space_found at col %d", set_num);
+        $display("find_space_in_set - space_found at col %d, block_num is %d", set_num, row);
     end
     endtask
 
@@ -210,7 +219,7 @@ module cache #(
        This is used when there are no free columns in the set, we make room by ejecting the oldest value in the set */
     task automatic find_oldest_set_col(
         input byte row,
-        output oldest_set_col
+        output reg [1:0] oldest_set_col
     );
     reg highest_index = 0;
     reg [3:0] highest_val;
@@ -227,11 +236,10 @@ module cache #(
        It will then make the set being accessed have its value changed to 0  */
     task automatic update_lru(
         input byte row,
-        input set_num
+        input reg [1:0] set_num
     );
         /*  Increase the staleness value by 1 for each entry in the LRU 
-            Not checking if it is VLD, it is probablyfaster to just add blindly 
-        */
+            Not checking if it is VLD, it is probably faster to just add blindly */
         for(int i = 0; i < CACHE_NUM_ROW; i++) begin
             for(int j = 0; j < CACHE_NUM_SET; j++) begin
                 if(LRU[i][j] != LRU_BPS_SQRD ) begin
@@ -267,16 +275,18 @@ module cache #(
             block_num = block_address % CACHE_NUM_ROW; /* modulo to get the physical row number (since the block address can be bigger than the block number ) */ 
             $display("block_address is %d", block_address );
             $display("block_num is %d", block_num);
+            $display("tag is %d", address_in[15:5]);
+            $display("offset is %d", address_in [1:0]);
 
             /* Let's assume a load */
             if(instr_type == READ) begin
                 /* Use the two variables below to send to set_tag_match, to check if data is in cache already */
                 static  reg set_match_stm = 0;
-                static  reg set_num_stm = 0;
+                static  reg [1:0] set_num_stm = 0;
 
                 /* Use the two variables below to send to find_space_in_set, used when data is not in cache, checks if there is space in the set to load from memory */
                 static reg space_found_fsis = 0;
-                static reg set_num_fsis = 0;
+                static reg [1:0] set_num_fsis = 0;
 
                 $display("Got a read instruction");
                 set_tag_match(block_num, address_in[15:5], set_match_stm, set_num_stm);
@@ -326,13 +336,14 @@ module cache #(
             /* Let's assume a store */
             else if(instr_type == WRITE) begin
                 static reg space_found_st = 0;
-                static reg set_num_st = 0;
+                static reg [1:0] set_num_st = 0;
 
                 $display("Got a write instruction");
 
                 find_space_in_set(block_num, space_found_st, set_num_st);
                 if(space_found_st) begin
                     vld_set[block_num][set_num_st] = 1;
+                    $display("vld_set[%d][%d] is %d", block_num, set_num_st, vld_set[block_num][set_num_st]);
                     cache_data[block_num][set_num_st] = '0;
                     tag_number_set[block_num][set_num_st] = address_in[15:5];
                 end 
