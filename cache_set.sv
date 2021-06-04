@@ -1,14 +1,26 @@
-/* This contains a 4 way set associative cache
+/* 
+This contains a 4 way set associative cache
 
 Defaults:
-Cache Block = 32 bits
-Address     = 16 bits
-Memory data = 32 bits
+Cache Block  = 32 bits
+Address      = 16 bits
+Memory data  = 32 bits
+Cache Output = 16 bits
 
 Address layout (MSB):
 Tag         = 11 bits
 Block       = 3 bits
 Offset      = 2 bits
+----------------------------------
+Example breakdown 1:
+
+Address = 0x0068
+0000 0000 1010 1000
+
+15                                     0
+| 0000 0000 100 |   010   |     00     |
+       Tag         Block      Offset
+----------------------------------
 
 */
 `default_nettype none
@@ -17,16 +29,17 @@ typedef enum {READ, WRITE} INSTR_TYPE;
 
 module tb();
     reg clk = 0;
+    reg rst_n = 0;
     reg [15:0] address = 0;
     reg [15:0] data = 0;
     reg [15:0] data_f_dut;
     reg activate = 0;
     
     wire[31:0] block_f_cache;
+    wire cache_output_rdy;
     wire mem_load_req_f_cache;
     wire mem_store_req_f_cache;
     wire mem_load_req_rdy;
-    wire mem_load_toggle;       /* This toggles back and forward when loading a cache block */
     wire mem_store_completed;   /* Memory confirming it has stored cache block */
     wire mem_store_ack;         /* Cache confirming it has ack the cache block write */
     wire [31:0] mem_data;       /* Cache block from memory*/
@@ -47,10 +60,11 @@ module tb();
     always #5 clk = ~clk;
 
     cache dut (
+        .clk(clk),
+        .rst_n(rst_n),
         .address_in(address),
         .data_in(data), 
         .data_out(data_f_dut), 
-        .activate(activate),
         .instr_type (instr_type),
 
         .data_to_mem(block_f_cache),
@@ -59,9 +73,9 @@ module tb();
         .mem_load_req_rdy(mem_load_req_rdy),
         .mem_store_completed(mem_store_completed),
         .mem_store_ack(mem_store_ack),
-        .mem_load_toggle(mem_load_toggle),
         .address_to_mem(address_f_cache),
-        .data_f_mem(mem_data)
+        .data_f_mem(mem_data),
+        .cache_output_rdy(cache_output_rdy)
         );
 
     RAM simple_ram (
@@ -73,58 +87,83 @@ module tb();
         .load_completed(mem_load_req_rdy),
         .store_completed(mem_store_completed),
         .store_ack (mem_store_ack),
-        .mem_load_req (mem_load_req_f_cache),
-        .load_toggle (mem_load_toggle)
+        .mem_load_req (mem_load_req_f_cache)
     );
 
     initial begin
-        activate = 0;
+        rst_n = 0;
+        @(posedge clk);
 
-        #5;
         /*tag = 0, block_num = 1, offset = 0 */
-        activate = 1;
+        rst_n = 1;
         instr_type = WRITE;
         address = 16'h0004;
         data = 16'h0100;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
         
-        #50;
+
         /*tag = 0, block_num = 2, offset = 0 */
         instr_type = WRITE;
         address = 16'h0008;
         data = 16'hDEAD;
-
-        #200;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+        
+        
         /*tag = 1, block_num = 2, offset = 0*/
         instr_type = READ;
         address = 16'h0028;
         data = 16'hBEEF;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
         
-        #100;
+
         /* tag = 3, block_num = 2, offset = 0 */
         instr_type = WRITE;
         address = 16'h0068;
         data = 16'hf01d;
-
-        #100;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+        
         /* tag = 4, block_num = 2, offset = 0 */
         instr_type = WRITE;
         address = 16'h0088;
         data = 16'hf01d;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+        
 
-        #100;
         /* tag = 5, block_num = 2, offset = 0 */
         /* At this point, there should be an eviction to main memory */
         instr_type = WRITE;
         address = 16'h00A8;
         data = 16'hca11;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+        
 
-        #100;
         /* tag = 5, block_num = 2, offset = 0 */
         /* Verify the data above has replaced the oldest data in the cache data (hDEAD at cache set 0) */
         instr_type = READ;
         address = 16'h00A8;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
         
-        #300;
         $finish;
     end
     
@@ -145,10 +184,11 @@ module cache #(
     )
     (
   
+    input clk, rst_n,
     input[15:0] address_in,
     input [15:0] data_in,
     output reg[15:0] data_out,
-    input activate,
+    //input activate,
     input INSTR_TYPE instr_type,   // 0 = read, 1 = write
 
     output reg [31:0] data_to_mem,      /* The data(cache block) that should be saved from the cache to memory */
@@ -158,9 +198,8 @@ module cache #(
     output reg mem_store_ack,           /* If high, then the memory has succesfully stored */
     input mem_store_completed,          /* If high, memory has stored 4 bytes from the cache block.*/
     input mem_load_req_rdy,             /* If high, the data loaded from memory is ready */
-    input mem_load_toggle,              /* This is not used, this would be if we needed to 'burst' the ram, aka if we needed multiple clock cycles to fill the cache block*/
-    output reg [15:0] address_to_mem    /* Address to memory, used when requesting data to load/store*/
-    
+    output reg [15:0] address_to_mem,   /* Address to memory, used when requesting data to load/store*/
+    output reg cache_output_rdy         /* High when the cache is ready, tb/other modules can read now */
 ); 
     reg vld_set [0:7] [4];                          /* 1 bit for each set  */
     reg [31:0] cache_data [0:7] [4];                /* If you load address 0x02, get the data for 0x00 as well in the cache. If you grab 0x00, also get 0x02 */
@@ -174,7 +213,7 @@ module cache #(
 
     reg output_ready = 0;                           /* Used by the main cache block to signal the output is ready
                                                         Then an always @(posedge clk) block uses this to synchronize the cache to a clock */
-
+    reg activate = 0;                               /* If reset, this is set to 0 */
     task send_to_mem (
         input byte row, 
         input reg [1:0]set_col 
@@ -290,9 +329,20 @@ module cache #(
         LRU[row][set_num] = 0;
     endtask
     
-    // always @(posedge clk, negedge rst) begin
-        
-    // end
+    /* This block is used to synchronize the cache to a clock 
+       cache_output_rdy is signaled to the outside world, output_ready is from internal combinational logic*/
+    always @(posedge clk, negedge rst_n) begin
+        if(rst_n == 0) begin
+            activate <= 0;
+        end else if(rst_n) begin
+            activate <= 1;
+            if(output_ready) begin
+                cache_output_rdy <= 1;
+            end else begin
+                cache_output_rdy <= 0;
+            end
+        end
+    end
 
     /* Limited trigger list, want to avoid this getting called unnecessarily. Hopefully nothing bad happens! */
     always@(activate, address_in, data_in, instr_type) begin
