@@ -1,3 +1,16 @@
+/* This contains a 4 way set associative cache
+
+Defaults:
+Cache Block = 32 bits
+Address     = 16 bits
+Memory data = 32 bits
+
+Address layout (MSB):
+Tag         = 11 bits
+Block       = 3 bits
+Offset      = 2 bits
+
+*/
 `default_nettype none
 
 typedef enum {READ, WRITE} INSTR_TYPE;
@@ -70,11 +83,13 @@ module tb();
         #5;
         /*tag = 0, block_num = 1, offset = 0 */
         activate = 1;
+        instr_type = WRITE;
         address = 16'h0004;
         data = 16'h0100;
         
         #50;
         /*tag = 0, block_num = 2, offset = 0 */
+        instr_type = WRITE;
         address = 16'h0008;
         data = 16'hDEAD;
 
@@ -96,7 +111,19 @@ module tb();
         address = 16'h0088;
         data = 16'hf01d;
 
+        #100;
+        /* tag = 5, block_num = 2, offset = 0 */
+        /* At this point, there should be an eviction to main memory */
+        instr_type = WRITE;
+        address = 16'h00A8;
+        data = 16'hca11;
 
+        #100;
+        /* tag = 5, block_num = 2, offset = 0 */
+        /* Verify the data above has replaced the oldest data in the cache data (hDEAD at cache set 0) */
+        instr_type = READ;
+        address = 16'h00A8;
+        
         #300;
         $finish;
     end
@@ -145,12 +172,16 @@ module cache #(
     reg read_success = 0;                           /* If high, we have successfully read from memory */   
     reg [3:0] LRU [0:7][4];                         /* Used to keep track of the oldest column in the set. The oldest gets evicted*/
 
+    reg output_ready = 0;                           /* Used by the main cache block to signal the output is ready
+                                                        Then an always @(posedge clk) block uses this to synchronize the cache to a clock */
+
     task send_to_mem (
         input byte row, 
-        input set_col 
+        input reg [1:0]set_col 
         );
         begin
            data_to_mem = cache_data[row][set_col];
+           $display("Send to mem, set column is %d", set_col);
            $display("Send to mem, data[%d][%d] is %h", row, set_col , cache_data[row][set_col]);
            mem_store_req = 1;
            address_to_mem = address_in;
@@ -200,9 +231,10 @@ module cache #(
         output reg space_found,
         output reg[1:0] set_num
     );
+
     reg state = 0;
     begin
-        
+        space_found = 0;
         for(int i = 0; i < CACHE_NUM_SET; i++) begin
             if(vld_set[row][i] == 0 && state == 0) begin
                 space_found = 1;
@@ -211,6 +243,7 @@ module cache #(
                 $display("find_space_in_set - space at vld_set[%d][%d]", row, i);
             end
         end 
+        if(space_found)
         $display("find_space_in_set - space_found at col %d, block_num is %d", set_num, row);
     end
     endtask
@@ -221,14 +254,20 @@ module cache #(
         input byte row,
         output reg [1:0] oldest_set_col
     );
-    reg highest_index = 0;
+    reg [1:0] highest_index = 0;
     reg [3:0] highest_val;
 
-    for(int i = 0; i < CACHE_NUM_SET; i++) begin
-        if(highest_val < LRU[row][i]) begin
-            highest_val = LRU[row][i];
-            highest_index = i;
+    begin
+        /* Set index to 0 initially, then start the loop at 1 to find the largest LRU value */
+        highest_val = LRU[row][0];
+        highest_index = 0;
+        for(int i = 1; i < CACHE_NUM_SET; i++) begin
+            if(highest_val < LRU[row][i]) begin
+                highest_val = LRU[row][i];
+                highest_index = i;
+            end
         end
+        oldest_set_col = highest_index;
     end
     endtask
 
@@ -251,9 +290,13 @@ module cache #(
         LRU[row][set_num] = 0;
     endtask
     
+    // always @(posedge clk, negedge rst) begin
+        
+    // end
+
     /* Limited trigger list, want to avoid this getting called unnecessarily. Hopefully nothing bad happens! */
     always@(activate, address_in, data_in, instr_type) begin
-        
+
         if(!activate) begin
             /* If we are not activated, set the vld bits to 0 */
             for(int i = 0; i < 8; i++) begin
@@ -264,6 +307,7 @@ module cache #(
         end
 
         if(activate) begin
+            output_ready = 0;
             $display("instr type is %d, time is: %0t", instr_type, $time);
             if(address_in % 2 != 0) begin
                 $display("Address needs to be word aligned (divisible by 2) for now");
@@ -345,13 +389,12 @@ module cache #(
                     vld_set[block_num][set_num_st] = 1;
                     $display("vld_set[%d][%d] is %d", block_num, set_num_st, vld_set[block_num][set_num_st]);
                     cache_data[block_num][set_num_st] = '0;
-                    tag_number_set[block_num][set_num_st] = address_in[15:5];
                 end 
 
                 else if(space_found_st == 0) begin
-                    /* If data is already present in this cache line, and we are writing to it and there is no free space in the set
-                    We should evict the current set data first */
-                    $display("block is already valid, sending old cache line to memory");
+                    /* If the cache block is full, and we are writing to it and there is no free space in the set
+                    We should evict the oldest column in the set */
+                    $display("cache block is full, sending old set column to memory");
                     find_oldest_set_col(block_num, set_num_st);
                     send_to_mem(block_num, set_num_st); 
                 end
@@ -364,11 +407,14 @@ module cache #(
                     cache_data[block_num][set_num_st][31:16] = data_in;
                 end
 
+                tag_number_set[block_num][set_num_st] = address_in[15:5];
+
                 /* Increase the staleness for every value in the LRU and reset the one just accessed */
                 update_lru(block_num, set_num_st);
             end
             
             read_success = 0;
+            output_ready = 1;
             $display("--------------");
         end
 end
@@ -401,10 +447,7 @@ initial begin
 end
 
 always @(posedge clk) begin
-    // if(store_ack) begin
-    //     mem[address_in] <= data_in;
-    //     store_completed <= 0;   /*We need to tell the cache to continue */
-    // end
+
     if(wren) begin 
         mem[address_in] <= data_in;
         store_completed <= 1;
@@ -416,12 +459,6 @@ always @(posedge clk) begin
         load_completed <= 1;
     end else begin
         load_completed <= 0;
-    end
-    
-    if(wren) begin
-        // $display("Write enable in memory is 1");
-        // $display("Data in is %h", data_in);
-        // $display("Data out is %h", data_out);
     end
 
     data_out <= mem[address_in];
