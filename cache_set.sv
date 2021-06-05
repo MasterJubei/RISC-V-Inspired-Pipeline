@@ -198,6 +198,24 @@ module tb();
             @(posedge clk);
         end
 
+        /* tag = 7, block_num = 6, offset = 2 */
+        /* Read back 2nd half of the cache block */
+        instr_type = READ;
+        address = 16'h00FA;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+
+        /* tag = 7, block_num = 6, offset = 2 */
+        /* Read back 1st half of the cache block */
+        instr_type = READ;
+        address = 16'h00F8;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+
 
         
         #300;
@@ -317,7 +335,7 @@ module cache #(
         space_found = 0;
         for(int i = 0; i < CACHE_NUM_SET; i++) begin
             /* Check if the cache column is invalid, aka it is available
-               OR if it is valid AND the tag is the same as what was already in there */
+               OR if it is valid AND the tag is the same as what was already in there, should write there */
             if(
                 ((vld_set[row][i] == 0) && (state == 0)) || 
                 ((vld_set[row][i] == 1) && (tag == tag_number_set[row][i]) && (state == 0))
@@ -472,7 +490,7 @@ module cache #(
                         update_lru(block_num, set_num_fsis);
                     end
                 end
-                $display("Read data from ram, data_out from cache is %h", data_out);
+                $display("Read data from cache, data_out from cache is %h", data_out);
             end
 
             /* Let's assume a store */
@@ -486,7 +504,6 @@ module cache #(
                 if(space_found_st) begin
                     vld_set[block_num][set_num_st] = 1;
                     $display("vld_set[%d][%d] is %d", block_num, set_num_st, vld_set[block_num][set_num_st]);
-                    cache_data[block_num][set_num_st] = '0;
                 end 
 
                 else if(space_found_st == 0) begin
@@ -497,11 +514,11 @@ module cache #(
                     send_to_mem(block_num, set_num_st); 
                 end
 
-                if(address_in % 4 == 0) begin
+                if(offset == 0) begin
                     cache_data[block_num][set_num_st][15:0] = data_in;
                 end
 
-                else if(address_in % 4 == 2) begin
+                else if(offset == 2) begin
                     cache_data[block_num][set_num_st][31:16] = data_in;
                 end
 
