@@ -244,8 +244,7 @@ module cache #(
     input[15:0] address_in,
     input [15:0] data_in,
     output reg[15:0] data_out,
-    //input activate,
-    input INSTR_TYPE instr_type,   // 0 = read, 1 = write
+    input INSTR_TYPE instr_type,        // 0 = read, 1 = write
 
     output reg [31:0] data_to_mem,      /* The data(cache block) that should be saved from the cache to memory */
     input [31:0] data_f_mem,            /* The data from memory that will go in a cache block*/
@@ -270,7 +269,7 @@ module cache #(
 
     reg output_ready = 0;                           /* Used by the main cache block to signal the output is ready
                                                         Then an always @(posedge clk) block uses this to synchronize the cache to a clock */
-    reg activate = 0;                               /* If reset, this is set to 0 */
+    reg activate = 0;                               /* Set to 1 when not reset, can start the cache */
 
     task send_to_mem (
         input byte row, 
@@ -335,7 +334,7 @@ module cache #(
         space_found = 0;
         for(int i = 0; i < CACHE_NUM_SET; i++) begin
             /* Check if the cache column is invalid, aka it is available
-               OR if it is valid AND the tag is the same as what was already in there, should write there */
+               OR if it is valid AND the tag is the same as what was already in the set column */
             if(
                 ((vld_set[row][i] == 0) && (state == 0)) || 
                 ((vld_set[row][i] == 1) && (tag == tag_number_set[row][i]) && (state == 0))
