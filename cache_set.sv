@@ -91,8 +91,12 @@ module tb();
     );
 
     initial begin
-        rst_n = 0;
+        rst_n = 0;        
         @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+
 
         /*tag = 0, block_num = 1, offset = 0 */
         rst_n = 1;
@@ -100,6 +104,7 @@ module tb();
         address = 16'h0004;
         data = 16'h0100;
         @(posedge clk);
+        $display("cache output status is %d", cache_output_rdy);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
         end
@@ -163,7 +168,39 @@ module tb();
         while(cache_output_rdy == 0) begin
             @(posedge clk);
         end
+
+        /* tag = 7, block_num = 6, offset = 0 */
+        instr_type = WRITE;
+        address = 16'h00F8;
+        data = 16'hba1d;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+
+        /* tag = 7, block_num = 6, offset = 0 */
+        /* Read the above write */
+        $display("cache output status is %d", cache_output_rdy);
+        instr_type = READ;
+        address = 16'h00F8;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+
+        /* tag = 7, block_num = 6, offset = 2 */
+        /* Write to the 2nd half of the cache block as the address above */
+        instr_type = WRITE;
+        address = 16'h00FA;
+        data = 16'hfe11;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+
+
         
+        #300;
         $finish;
     end
     
@@ -180,10 +217,11 @@ module cache #(
     parameter CACHE_NUM_SET = 4,                        /* Number of sets per row in the cache */
     parameter LRU_BPS = 4,                              /* LRU Bits per set, How many bits allocated for the staleness of each set in the LRU */
     parameter LRU_BPS_SQRD = LRU_BPS * LRU_BPS - 1     /* Max value of 4 bits */
-    //parameter WIDTH_AD   = 8
+    
     )
     (
-  
+    
+    /* To avoid the code becoming harder to read, the bit declaration sizes here are not replaced with `defines or params */
     input clk, rst_n,
     input[15:0] address_in,
     input [15:0] data_in,
@@ -199,14 +237,15 @@ module cache #(
     input mem_store_completed,          /* If high, memory has stored 4 bytes from the cache block.*/
     input mem_load_req_rdy,             /* If high, the data loaded from memory is ready */
     output reg [15:0] address_to_mem,   /* Address to memory, used when requesting data to load/store*/
-    output reg cache_output_rdy         /* High when the cache is ready, tb/other modules can read now */
+    output reg cache_output_rdy = 0        /* High when the cache is ready, tb/other modules can read now */
 ); 
     reg vld_set [0:7] [4];                          /* 1 bit for each set  */
     reg [31:0] cache_data [0:7] [4];                /* If you load address 0x02, get the data for 0x00 as well in the cache. If you grab 0x00, also get 0x02 */
     reg [10:0] tag_number_set [0:7] [4];            /* We have a tag number for each set in the cache block */
     reg [15:0] block_address;                       /* We will divide address by cache size to get block address */ 
     reg [15:0] block_num;                           /* We will modulo the block addres by cache size to get the column */
-    
+    reg [1:0] offset;                               /* The last two bits are the byte offset */
+
     parameter BL_NUM_BYTES = 4;                     /* Number of bytes in a block, aka number of columns */
     reg read_success = 0;                           /* If high, we have successfully read from memory */   
     reg [3:0] LRU [0:7][4];                         /* Used to keep track of the oldest column in the set. The oldest gets evicted*/
@@ -214,6 +253,7 @@ module cache #(
     reg output_ready = 0;                           /* Used by the main cache block to signal the output is ready
                                                         Then an always @(posedge clk) block uses this to synchronize the cache to a clock */
     reg activate = 0;                               /* If reset, this is set to 0 */
+
     task send_to_mem (
         input byte row, 
         input reg [1:0]set_col 
@@ -267,6 +307,7 @@ module cache #(
        Used to find if there is an empty column when writing, (if there isn't we call find_oldest_set_col instead, but not here) */
     task automatic find_space_in_set(
         input byte row,
+        input reg [10:0] tag,
         output reg space_found,
         output reg[1:0] set_num
     );
@@ -275,12 +316,18 @@ module cache #(
     begin
         space_found = 0;
         for(int i = 0; i < CACHE_NUM_SET; i++) begin
-            if(vld_set[row][i] == 0 && state == 0) begin
-                space_found = 1;
-                set_num = i;
-                state = 1;
-                $display("find_space_in_set - space at vld_set[%d][%d]", row, i);
-            end
+            /* Check if the cache column is invalid, aka it is available
+               OR if it is valid AND the tag is the same as what was already in there */
+            if(
+                ((vld_set[row][i] == 0) && (state == 0)) || 
+                ((vld_set[row][i] == 1) && (tag == tag_number_set[row][i]) && (state == 0))
+            ) 
+                begin
+                    space_found = 1;
+                    set_num = i;
+                    state = 1;
+                    $display("find_space_in_set - space at vld_set[%d][%d]", row, i);
+                end
         end 
         if(space_found)
         $display("find_space_in_set - space_found at col %d, block_num is %d", set_num, row);
@@ -334,6 +381,13 @@ module cache #(
     always @(posedge clk, negedge rst_n) begin
         if(rst_n == 0) begin
             activate <= 0;
+            for(int  i = 0; i < 8; i=i+1) begin
+                for(int j = 0; j < 4; j=j+1) begin
+                    vld_set[i][j] <= 0;
+                end
+            end
+            cache_output_rdy <= 1;
+
         end else if(rst_n) begin
             activate <= 1;
             if(output_ready) begin
@@ -341,23 +395,16 @@ module cache #(
             end else begin
                 cache_output_rdy <= 0;
             end
+
         end
     end
 
     /* Limited trigger list, want to avoid this getting called unnecessarily. Hopefully nothing bad happens! */
     always@(activate, address_in, data_in, instr_type) begin
-
-        if(!activate) begin
-            /* If we are not activated, set the vld bits to 0 */
-            for(int i = 0; i < 8; i++) begin
-                for(int j = 0; j < 4; j++) begin
-                    vld_set[i][j] = 0;
-                end
-            end
-        end
+        output_ready = 0;
 
         if(activate) begin
-            output_ready = 0;
+            
             $display("instr type is %d, time is: %0t", instr_type, $time);
             if(address_in % 2 != 0) begin
                 $display("Address needs to be word aligned (divisible by 2) for now");
@@ -367,6 +414,7 @@ module cache #(
 
             block_address = address_in / BL_NUM_BYTES; /* divide by number of columns to find the row, aka block address # */
             block_num = block_address % CACHE_NUM_ROW; /* modulo to get the physical row number (since the block address can be bigger than the block number ) */ 
+            offset = address_in[1:0];
             $display("block_address is %d", block_address );
             $display("block_num is %d", block_num);
             $display("tag is %d", address_in[15:5]);
@@ -387,10 +435,10 @@ module cache #(
                 if(set_match_stm) begin
                     $display("vld[block_num] passed");
                     read_success = 1;
-                    if(address_in % 4 == 0) begin
+                    if(offset == 0) begin
                         data_out = cache_data[block_num][set_num_stm][15:0];
                     end 
-                    else if(address_in % 4 == 2) begin
+                    else if(offset == 2) begin
                         data_out = cache_data[block_num][set_num_stm][31:16];
                     end
                     /* Increase the staleness for every value in the LRU and reset the one just accessed */
@@ -403,7 +451,7 @@ module cache #(
                     mem_load_req = 1;
                     address_to_mem = address_in;
 
-                    find_space_in_set(block_num, space_found_fsis, set_num_fsis);
+                    find_space_in_set(block_num, address_in[15:5], space_found_fsis, set_num_fsis);
                     if(space_found_fsis) begin
 
                         wait (mem_load_req_rdy == 1) begin
@@ -411,10 +459,10 @@ module cache #(
                             $display("inside read, data_f_mem is %h", data_f_mem);
                         end 
                         
-                        if(address_in % 4 == 0) begin
+                        if(offset == 0) begin
                             data_out = cache_data[block_num][set_num_fsis][15:0];
                         end 
-                        else if(address_in % 4 == 2) begin
+                        else if(offset == 2) begin
                             data_out = cache_data[block_num][set_num_fsis][31:16];
                         end
 
@@ -432,9 +480,9 @@ module cache #(
                 static reg space_found_st = 0;
                 static reg [1:0] set_num_st = 0;
 
-                $display("Got a write instruction");
-
-                find_space_in_set(block_num, space_found_st, set_num_st);
+                $display("Got a write instruction, data to write is %h", data_in);
+                
+                find_space_in_set(block_num, address_in[15:5], space_found_st, set_num_st);
                 if(space_found_st) begin
                     vld_set[block_num][set_num_st] = 1;
                     $display("vld_set[%d][%d] is %d", block_num, set_num_st, vld_set[block_num][set_num_st]);
