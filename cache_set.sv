@@ -91,88 +91,96 @@ module tb();
     );
 
     initial begin
-        rst_n = 0;        
+        rst_n <= 0;        
         @(posedge clk);
-        while(cache_output_rdy == 0) begin
-            @(posedge clk);
-        end
-
+        @(posedge clk);
 
         /*tag = 0, block_num = 1, offset = 0 */
         rst_n = 1;
-        instr_type = WRITE;
-        address = 16'h0004;
-        data = 16'h0100;
+        instr_type <= WRITE;
+        address <= 16'h0004;
+        data <= 16'hface;
         @(posedge clk);
-        $display("cache output status is %d", cache_output_rdy);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
         end
-        
 
+        
+        /*tag = 0, block_num = 1, offset = 0 */
+        /* Read data back above */
+        rst_n = 1;
+        instr_type <= READ;
+        address <= 16'h0004;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+
+        /* block num 2, size = 1 */ 
         /*tag = 0, block_num = 2, offset = 0 */
-        instr_type = WRITE;
-        address = 16'h0008;
-        data = 16'hDEAD;
+        instr_type <= WRITE;
+        address <= 16'h0008;
+        data <= 16'hDEAD;
         @(posedge clk);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
         end
         
-        
+        /* block num 2, size = 2 */
         /*tag = 1, block_num = 2, offset = 0*/
-        instr_type = READ;
-        address = 16'h0028;
-        data = 16'hBEEF;
+        instr_type <= READ;
+        address <= 16'h0028;
         @(posedge clk);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
         end
-        
 
+        /* block num 2, size = 3 */
+        /* tag = 2, block_num = 2, offset = 0 */
+        instr_type <= WRITE;
+        address <= 16'h0048;
+        data <= 16'hcafe;
+        @(posedge clk);
+        while(cache_output_rdy == 0) begin
+            @(posedge clk);
+        end
+        
+        /* block num 2, size = 4 */
         /* tag = 3, block_num = 2, offset = 0 */
-        instr_type = WRITE;
-        address = 16'h0068;
-        data = 16'hf01d;
+        instr_type <= WRITE;
+        address <= 16'h0068;
+        data <= 16'hf01d;
         @(posedge clk);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
         end
-        
-        /* tag = 4, block_num = 2, offset = 0 */
-        instr_type = WRITE;
-        address = 16'h0088;
-        data = 16'hf01d;
-        @(posedge clk);
-        while(cache_output_rdy == 0) begin
-            @(posedge clk);
-        end
-        
+            
 
         /* tag = 5, block_num = 2, offset = 0 */
         /* At this point, there should be an eviction to main memory */
-        instr_type = WRITE;
-        address = 16'h00A8;
-        data = 16'hca11;
+        instr_type <= WRITE;
+        address <= 16'h00A8;
+        data <= 16'hca11;
+        $display("cache status is %d", cache_output_rdy);
         @(posedge clk);
+        $display("cache status is %d", cache_output_rdy);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
         end
         
-
         /* tag = 5, block_num = 2, offset = 0 */
         /* Verify the data above has replaced the oldest data in the cache data (hDEAD at cache set 0) */
-        instr_type = READ;
-        address = 16'h00A8;
+        instr_type <= READ;
+        address <= 16'h00A8;
         @(posedge clk);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
         end
 
         /* tag = 7, block_num = 6, offset = 0 */
-        instr_type = WRITE;
-        address = 16'h00F8;
-        data = 16'hba1d;
+        instr_type <= WRITE;
+        address <= 16'h00F8;
+        data <= 16'hba1d;
         @(posedge clk);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
@@ -180,9 +188,8 @@ module tb();
 
         /* tag = 7, block_num = 6, offset = 0 */
         /* Read the above write */
-        $display("cache output status is %d", cache_output_rdy);
-        instr_type = READ;
-        address = 16'h00F8;
+        instr_type <= READ;
+        address <= 16'h00F8;
         @(posedge clk);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
@@ -190,9 +197,9 @@ module tb();
 
         /* tag = 7, block_num = 6, offset = 2 */
         /* Write to the 2nd half of the cache block as the address above */
-        instr_type = WRITE;
-        address = 16'h00FA;
-        data = 16'hfe11;
+        instr_type <= WRITE;
+        address <= 16'h00FA;
+        data <= 16'hfe11;
         @(posedge clk);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
@@ -200,8 +207,8 @@ module tb();
 
         /* tag = 7, block_num = 6, offset = 2 */
         /* Read back 2nd half of the cache block */
-        instr_type = READ;
-        address = 16'h00FA;
+        instr_type <= READ;
+        address <= 16'h00FA;
         @(posedge clk);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
@@ -209,14 +216,12 @@ module tb();
 
         /* tag = 7, block_num = 6, offset = 2 */
         /* Read back 1st half of the cache block */
-        instr_type = READ;
-        address = 16'h00F8;
+        instr_type <= READ;
+        address <= 16'h00F8;
         @(posedge clk);
         while(cache_output_rdy == 0) begin
             @(posedge clk);
         end
-
-
         
         #300;
         $finish;
@@ -254,7 +259,7 @@ module cache #(
     input mem_store_completed,          /* If high, memory has stored 4 bytes from the cache block.*/
     input mem_load_req_rdy,             /* If high, the data loaded from memory is ready */
     output reg [15:0] address_to_mem,   /* Address to memory, used when requesting data to load/store*/
-    output reg cache_output_rdy = 0        /* High when the cache is ready, tb/other modules can read now */
+    output wire cache_output_rdy       /* High when the cache is ready, tb/other modules can read now */
 ); 
     reg vld_set [0:7] [4];                          /* 1 bit for each set  */
     reg [31:0] cache_data [0:7] [4];                /* If you load address 0x02, get the data for 0x00 as well in the cache. If you grab 0x00, also get 0x02 */
@@ -267,9 +272,10 @@ module cache #(
     reg read_success = 0;                           /* If high, we have successfully read from memory */   
     reg [3:0] LRU [0:7][4];                         /* Used to keep track of the oldest column in the set. The oldest gets evicted*/
 
-    reg output_ready = 0;                           /* Used by the main cache block to signal the output is ready
-                                                        Then an always @(posedge clk) block uses this to synchronize the cache to a clock */
     reg activate = 0;                               /* Set to 1 when not reset, can start the cache */
+    reg busy;                                       /* High when the cache is performing operations */
+
+    assign cache_output_rdy = !busy;
 
     task send_to_mem (
         input byte row, 
@@ -393,35 +399,28 @@ module cache #(
         LRU[row][set_num] = 0;
     endtask
     
-    /* This block is used to synchronize the cache to a clock 
-       cache_output_rdy is signaled to the outside world, output_ready is from internal combinational logic*/
+    /* This block is used for handling reset. Want this sync'd to a clock, otherwise rst would need to be toggled */
     always @(posedge clk, negedge rst_n) begin
+
         if(rst_n == 0) begin
+            busy <= 0;
             activate <= 0;
             for(int  i = 0; i < 8; i=i+1) begin
                 for(int j = 0; j < 4; j=j+1) begin
                     vld_set[i][j] <= 0;
                 end
             end
-            cache_output_rdy <= 1;
 
         end else if(rst_n) begin
             activate <= 1;
-            if(output_ready) begin
-                cache_output_rdy <= 1;
-            end else begin
-                cache_output_rdy <= 0;
-            end
-
         end
     end
 
     /* Limited trigger list, want to avoid this getting called unnecessarily. Hopefully nothing bad happens! */
     always@(activate, address_in, data_in, instr_type) begin
-        output_ready = 0;
-
+        
         if(activate) begin
-            
+            busy = 1;
             $display("instr type is %d, time is: %0t", instr_type, $time);
             if(address_in % 2 != 0) begin
                 $display("Address needs to be word aligned (divisible by 2) for now");
@@ -432,6 +431,7 @@ module cache #(
             block_address = address_in / BL_NUM_BYTES; /* divide by number of columns to find the row, aka block address # */
             block_num = block_address % CACHE_NUM_ROW; /* modulo to get the physical row number (since the block address can be bigger than the block number ) */ 
             offset = address_in[1:0];
+            $display("address is %h", address_in);
             $display("block_address is %d", block_address );
             $display("block_num is %d", block_num);
             $display("tag is %d", address_in[15:5]);
@@ -527,8 +527,8 @@ module cache #(
                 update_lru(block_num, set_num_st);
             end
             
+            busy = 0;
             read_success = 0;
-            output_ready = 1;
             $display("--------------");
         end
 end
