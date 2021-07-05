@@ -14,7 +14,7 @@
 
 - Registers: 16, 16-bit registers
 
-- Cache is WIP, currently direct mapped
+- Cache is set associative. There are some states missing ;)
 
 - This is heavily based on The Morgan Kaufmann Series in Computer Architecture and design, RISC V Edition 2017
 
